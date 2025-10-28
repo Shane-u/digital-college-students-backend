@@ -17,7 +17,9 @@ import com.digital.model.vo.LoginUserVO;
 import com.digital.model.vo.UserVO;
 import com.digital.service.UserService;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Base64;
 import java.util.List;
 
 import com.digital.service.VerificationCodeService;
@@ -60,10 +62,18 @@ public class UserController {
      * 获取图形验证码
      */
     @GetMapping("/captcha")
-    public void getCaptcha(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    public String getCaptcha(HttpServletRequest request, HttpServletResponse response) throws IOException {
         LineCaptcha captcha = CaptchaUtils.generateCaptcha(request);
-        captcha.write(response.getOutputStream());
+
+        // 将图片流写入字节数组
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        captcha.write(baos);
+        byte[] imageBytes = baos.toByteArray();
+
+        // 转换为Base64字符串
+        return "data:image/png;base64," + Base64.getEncoder().encodeToString(imageBytes);
     }
+
 
     /**
      * 发送验证码（手机/邮箱）
