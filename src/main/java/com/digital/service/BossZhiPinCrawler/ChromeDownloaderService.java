@@ -34,13 +34,13 @@ public class ChromeDownloaderService {
             // 等待页面元素加载完成
             try {
                 driver.executeScript(
-                    "return new Promise((resolve) => { " +
-                    "  if (document.readyState === 'complete') { " +
-                    "    setTimeout(resolve, 2000); " +
-                    "  } else { " +
-                    "    window.addEventListener('load', () => setTimeout(resolve, 2000)); " +
-                    "  } " +
-                    "});"
+                        "return new Promise((resolve) => { " +
+                                "  if (document.readyState === 'complete') { " +
+                                "    setTimeout(resolve, 2000); " +
+                                "  } else { " +
+                                "    window.addEventListener('load', () => setTimeout(resolve, 2000)); " +
+                                "  } " +
+                                "});"
                 );
             } catch (Exception e) {
                 // 如果Promise失败，继续等待
@@ -50,11 +50,11 @@ public class ChromeDownloaderService {
             // 滚动页面，触发懒加载
             try {
                 driver.executeScript(
-                    "window.scrollTo(0, document.body.scrollHeight / 2);"
+                        "window.scrollTo(0, document.body.scrollHeight / 2);"
                 );
                 Thread.sleep(2000);
                 driver.executeScript(
-                    "window.scrollTo(0, document.body.scrollHeight - 1000);"
+                        "window.scrollTo(0, document.body.scrollHeight - 1000);"
                 );
                 Thread.sleep(2000);
             } catch (Exception e) {
