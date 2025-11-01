@@ -28,21 +28,37 @@ public class ChromeDownloaderService {
     public String download(String url) {
         try {
             driver.get(url);
-            Thread.sleep(4000);
+            // 增加等待时间，确保页面完全加载
+            Thread.sleep(5000);
 
-            // 滚动到页面底部，确保所有内容加载（添加空值检查）
+            // 等待页面元素加载完成
             try {
-                Object result = driver.executeScript(
-                    "if (document.body && document.body.scrollHeight) { " +
-                    "window.scrollTo(0, document.body.scrollHeight - 1000); " +
-                    "return true; } else { return false; }"
+                driver.executeScript(
+                    "return new Promise((resolve) => { " +
+                    "  if (document.readyState === 'complete') { " +
+                    "    setTimeout(resolve, 2000); " +
+                    "  } else { " +
+                    "    window.addEventListener('load', () => setTimeout(resolve, 2000)); " +
+                    "  } " +
+                    "});"
                 );
-                if (result != null && result.equals(true)) {
-                    Thread.sleep(3000);
-                }
             } catch (Exception e) {
-                // 如果滚动失败，继续执行，不影响页面内容获取
-                System.out.println("页面滚动失败，继续获取内容: " + e.getMessage());
+                // 如果Promise失败，继续等待
+                Thread.sleep(3000);
+            }
+
+            // 滚动页面，触发懒加载
+            try {
+                driver.executeScript(
+                    "window.scrollTo(0, document.body.scrollHeight / 2);"
+                );
+                Thread.sleep(2000);
+                driver.executeScript(
+                    "window.scrollTo(0, document.body.scrollHeight - 1000);"
+                );
+                Thread.sleep(2000);
+            } catch (Exception e) {
+                // 如果滚动失败，继续执行
             }
 
             // 获取页面源代码

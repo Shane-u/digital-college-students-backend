@@ -25,8 +25,8 @@ public class CrawlerController {
      * 启动BOSS直聘爬虫
      *
      * @param query    搜索关键词，如 "Java"
-     * @param cityCode 城市代码，如 "101300600" (广州)
-     * @param maxPages 最大爬取页面数，默认500
+     * @param cityCode 城市代码，如 "101270100" (成都)
+     * @param maxPages 最大爬取页面数，默认40
      * @return 响应结果
      */
     @PostMapping("/boss-zhipin/start")
@@ -79,8 +79,8 @@ public class CrawlerController {
      * 快速测试接口 - 直接在浏览器访问即可启动爬虫
      * 
      * @param query    搜索关键词，默认 "Java"
-     * @param cityCode 城市代码，默认 "101300600" (广州)
-     * @param maxPages 最大爬取页面数，默认 20
+     * @param cityCode 城市代码，默认 "101270100" (成都)
+     * @param maxPages 最大爬取页面数，默认 40
      * @return 响应结果
      */
     @GetMapping("/boss-zhipin/test")
