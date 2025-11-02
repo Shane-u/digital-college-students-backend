@@ -1,8 +1,12 @@
 package com.digital.controller;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.digital.common.BaseResponse;
 import com.digital.common.ResultUtils;
+import com.digital.model.dto.jobinfo.JobInfoQueryRequest;
+import com.digital.model.entity.JobInfo;
 import com.digital.service.BossZhiPinCrawler.BossZhiPinCrawlerService;
+import com.digital.service.JobInfoService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,6 +24,9 @@ public class CrawlerController {
 
     @Resource
     private BossZhiPinCrawlerService crawlerService;
+
+    @Resource
+    private JobInfoService jobInfoService;
 
     /**
      * 启动BOSS直聘爬虫
@@ -119,6 +126,52 @@ public class CrawlerController {
             BaseResponse<String> errorResponse = (BaseResponse<String>) ResultUtils.error(500, "启动爬虫失败: " + e.getMessage());
             return errorResponse;
         }
+    }
+
+    /**
+     * 分页查询招聘信息
+     * 支持通过 workName 字段进行模糊匹配
+     *
+     * @param workName   工作名称（模糊匹配，可选）
+     * @param companyName 公司名称（模糊匹配，可选）
+     * @param workAddress 工作地址（模糊匹配，可选）
+     * @param current    当前页码，默认1
+     * @param pageSize  每页数量，默认10，最大100
+     * @return 分页的招聘信息列表
+     */
+    @GetMapping("/job-info/list/page")
+    public BaseResponse<Page<JobInfo>> listJobInfoByPageGet(
+            @RequestParam(required = false) String workName,
+            @RequestParam(required = false) String companyName,
+            @RequestParam(required = false) String workAddress,
+            @RequestParam(defaultValue = "1") Integer current,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        
+        // 参数校验
+        if (current <= 0) {
+            current = 1;
+        }
+        if (pageSize <= 0) {
+            pageSize = 10;
+        }
+        // 限制每页最大数量
+        if (pageSize > 100) {
+            pageSize = 100;
+        }
+        
+        JobInfoQueryRequest queryRequest = new JobInfoQueryRequest();
+        queryRequest.setCurrent(current);
+        queryRequest.setPageSize(pageSize);
+        queryRequest.setWorkName(workName);
+        queryRequest.setCompanyName(companyName);
+        queryRequest.setWorkAddress(workAddress);
+        
+        Page<JobInfo> jobInfoPage = jobInfoService.page(
+                new Page<>(current, pageSize),
+                jobInfoService.getQueryWrapper(queryRequest)
+        );
+        
+        return ResultUtils.success(jobInfoPage);
     }
 }
 
