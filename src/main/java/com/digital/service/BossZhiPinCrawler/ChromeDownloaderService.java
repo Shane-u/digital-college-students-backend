@@ -4,7 +4,10 @@ import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.remote.RemoteWebDriver;
 import io.github.bonigarcia.wdm.WebDriverManager;
+import lombok.extern.slf4j.Slf4j;
 
+
+@Slf4j
 public class ChromeDownloaderService {
     // 声明驱动
     private RemoteWebDriver driver;
@@ -12,7 +15,21 @@ public class ChromeDownloaderService {
 
     public ChromeDownloaderService() {
         // 自动下载并设置 chromedriver
-        WebDriverManager.chromedriver().setup();
+        WebDriverManager webDriverManager = WebDriverManager.chromedriver();
+        webDriverManager.setup();
+        
+        // 获取并打印 chromedriver 的实际路径
+        try {
+            String driverPath = webDriverManager.getDownloadedDriverPath();
+            log.info("ChromeDriver 位置: {}", driverPath);
+            System.out.println("[ChromeDriver] 驱动文件位置: " + driverPath);
+        } catch (Exception e) {
+            // 如果获取路径失败，输出默认位置信息
+            String userHome = System.getProperty("user.home");
+            String defaultPath = userHome + "\\.cache\\selenium\\chromedriver\\";
+            log.info("ChromeDriver 可能位于: {}", defaultPath);
+            System.out.println("[ChromeDriver] 驱动文件可能位于: " + defaultPath);
+        }
 
         // 创建浏览器参数对象
         ChromeOptions chromeOptions = new ChromeOptions();

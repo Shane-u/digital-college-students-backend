@@ -425,46 +425,76 @@ public class BossZhiPinCrawlerService {
                 jobInfo.setWorkAddress(addressElement.text().trim());
             }
 
-            // 提取工作内容/职位描述 - 使用多种选择器
+            // 提取工作内容/职位描述 - 使用更精确的选择器，排除页面提示信息
+            // 优先查找职位详情区域的职位描述（排除操作提示）
             Element contentElement = doc.selectFirst(
-                "div.job-sec-text, " +
-                ".job-sec-text, " +
-                ".job-detail-content, " +
-                ".job-detail-text, " +
-                ".job-sec, " +
-                "[class*=job-sec], " +
-                "[class*=job-detail], " +
-                ".job-description, " +
-                ".description"
+                ".job-detail .job-sec-box .job-sec-text, " +
+                ".job-detail > .job-sec-box > .job-sec-text, " +
+                "div.job-detail-content .text, " +
+                ".job-sec-box .job-sec-text, " +
+                ".job-detail .job-sec-text"
             );
+            
+            // 如果找到，检查是否包含提示信息关键词
             if (contentElement != null) {
                 String content = contentElement.text().trim();
-                if (!content.isEmpty()) {
+                if (!content.isEmpty() && !containsPromptText(content)) {
                     jobInfo.setWorkContent(content);
+                } else if (!content.isEmpty() && containsPromptText(content)) {
+                    // 如果包含提示信息，清空以便重新提取
+                    log.debug("第一次提取的内容包含提示信息，将重新提取: {}", content.substring(0, Math.min(50, content.length())));
+                    jobInfo.setWorkContent(null);
                 }
             }
             
-            // 如果第一次提取失败，尝试从多个位置合并提取
-            if (jobInfo.getWorkContent() == null || jobInfo.getWorkContent().isEmpty()) {
+            // 如果第一次提取失败或包含提示信息，尝试更精确的选择器
+            if (jobInfo.getWorkContent() == null || jobInfo.getWorkContent().isEmpty() || containsPromptText(jobInfo.getWorkContent())) {
+                // 清空包含提示信息的内容
+                if (jobInfo.getWorkContent() != null && containsPromptText(jobInfo.getWorkContent())) {
+                    log.debug("检测到工作内容包含提示信息，将重新提取");
+                    jobInfo.setWorkContent(null);
+                }
+                // 查找所有可能的职位描述元素，但排除包含提示信息的
                 Elements contentElements = doc.select(
-                    ".job-sec-text, " +
-                    ".job-detail-content, " +
-                    "[class*=job-sec], " +
-                    "[class*=description]"
+                    ".job-sec-box .job-sec-text, " +
+                    ".job-detail .job-sec-text, " +
+                    ".job-detail-content .text"
                 );
                 StringBuilder contentBuilder = new StringBuilder();
                 for (Element el : contentElements) {
                     String text = el.text().trim();
-                    if (text != null && !text.isEmpty() && text.length() > 10) {
-                        if (contentBuilder.length() > 0) {
-                            contentBuilder.append("\n");
+                    // 过滤条件：文本不为空、长度大于10、不包含提示信息关键词
+                    if (text != null && !text.isEmpty() && text.length() > 10 && !containsPromptText(text)) {
+                        // 检查是否在正确的容器内（不在操作提示区域）
+                        Element parent = el.parent();
+                        if (parent != null) {
+                            String parentClass = parent.className();
+                            // 排除操作按钮、下载提示等区域
+                            if (!parentClass.contains("btn") && 
+                                !parentClass.contains("download") && 
+                                !parentClass.contains("action") &&
+                                !parentClass.contains("login")) {
+                                if (contentBuilder.length() > 0) {
+                                    contentBuilder.append("\n");
+                                }
+                                contentBuilder.append(text);
+                            }
+                        } else {
+                            // 如果没有父元素，直接添加
+                            if (contentBuilder.length() > 0) {
+                                contentBuilder.append("\n");
+                            }
+                            contentBuilder.append(text);
                         }
-                        contentBuilder.append(text);
                     }
                 }
                 if (contentBuilder.length() > 0) {
-                    jobInfo.setWorkContent(contentBuilder.toString());
-                    log.debug("从多个位置合并提取到工作内容，长度: {}", contentBuilder.length());
+                    String finalContent = contentBuilder.toString();
+                    // 再次过滤，确保不包含提示信息
+                    if (!containsPromptText(finalContent)) {
+                        jobInfo.setWorkContent(finalContent);
+                        log.debug("从多个位置合并提取到工作内容，长度: {}", finalContent.length());
+                    }
                 }
             }
 
@@ -631,6 +661,58 @@ public class BossZhiPinCrawlerService {
             log.error("处理详情页时出错: URL={}", url, e);
             return false;
         }
+    }
+
+    /**
+     * 检查文本是否包含页面提示信息关键词
+     * 用于过滤掉"下载App"、"点击登录"等非职位描述内容
+     * 
+     * @param text 要检查的文本
+     * @return 如果包含提示信息关键词返回true，否则返回false
+     */
+    private boolean containsPromptText(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        
+        // 定义需要过滤的提示信息关键词（明确的页面操作提示，不是职位描述）
+        String[] promptKeywords = {
+            "下载App",
+            "下载 APP",
+            "下载app",
+            "不错过Boss每一条消息",
+            "不错过boss每一条消息",
+            "不错过Boss每一条消息",
+            "点击登录",
+            "立即与BOSS沟通",
+            "立即与boss沟通",
+            "立即与Boss沟通",
+            "立即下载",
+            "扫码下载",
+            "打开APP",
+            "打开 App",
+            "打开app",
+            "APP下载",
+            "App下载"
+        };
+        
+        // 特别检查：如果文本很短且只包含提示信息，直接过滤
+        if (text.length() < 100 && (
+            text.contains("下载App") || 
+            text.contains("点击登录") || 
+            (text.contains("立即与") && text.contains("沟通")))) {
+            return true;
+        }
+        
+        String lowerText = text.toLowerCase();
+        for (String keyword : promptKeywords) {
+            if (lowerText.contains(keyword.toLowerCase())) {
+                log.debug("检测到提示信息关键词: '{}'，将过滤此内容", keyword);
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     /**

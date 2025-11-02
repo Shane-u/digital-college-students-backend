@@ -25,7 +25,7 @@ public class CrawlerAutoStartConfig implements CommandLineRunner {
     /**
      * 爬虫配置（可以根据需要修改这些参数）
      */
-    private boolean enabled = false;
+    private boolean enabled = true;////自动爬取开关
 
     /**
      * 默认搜索关键词（从配置文件读取）

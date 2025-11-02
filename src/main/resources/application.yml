@@ -15,7 +15,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/digital_college_students_backend
     username: root
-    password: 12345678 # 需要修改为自己的数据库密码，后续会部署服务器
+    password: Jkm20040716. # 需要修改为自己的数据库密码，后续会部署服务器
   # 邮件配置
   mail:
     host: smtp.163.com
@@ -91,7 +91,7 @@ cos:
 # 爬虫配置
 crawler:
   auto-start:
-    enabled: false  # 是否自动启动爬虫，false=禁用，true=启用
+    enabled: true  # 是否自动启动爬虫，false=禁用，true=启用
     query: "Java"  # 默认搜索关键词
     city-code: "101270100"  # 默认城市代码（成都）
     max-pages: 40  # 默认最大页数
