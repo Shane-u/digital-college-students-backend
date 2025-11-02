@@ -3,6 +3,7 @@ package com.digital.config;
 import com.digital.service.BossZhiPinCrawler.BossZhiPinCrawlerService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.Resource;
@@ -15,6 +16,7 @@ import jakarta.annotation.Resource;
  */
 @Component
 @Slf4j
+@ConfigurationProperties(prefix = "crawler.auto-start")
 public class CrawlerAutoStartConfig implements CommandLineRunner {
 
     @Resource
@@ -23,18 +25,43 @@ public class CrawlerAutoStartConfig implements CommandLineRunner {
     /**
      * 爬虫配置（可以根据需要修改这些参数）
      */
-    private static final String DEFAULT_QUERY = "Java"; // 默认搜索关键词
-    private static final String DEFAULT_CITY_CODE = "101270100"; // 默认城市代码（成都）101300600广州
-    private static final int DEFAULT_MAX_PAGES = 40; // 默认最大页数
+    private boolean enabled = false;
 
     /**
-     * 是否启用自动启动（设置为false可以禁用自动启动）
+     * 默认搜索关键词（从配置文件读取）
      */
-    private static final boolean ENABLE_AUTO_START = true;
+    private String query = "Java";
+
+    /**
+     * 默认城市代码（从配置文件读取）
+     */
+    private String cityCode = "101270100";
+
+    /**
+     * 默认最大页数（从配置文件读取）
+     */
+    private int maxPages = 40;
+
+    // Setter 方法
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+
+    public void setQuery(String query) {
+        this.query = query;
+    }
+
+    public void setCityCode(String cityCode) {
+        this.cityCode = cityCode;
+    }
+
+    public void setMaxPages(int maxPages) {
+        this.maxPages = maxPages;
+    }
 
     @Override
     public void run(String... args) {
-        if (!ENABLE_AUTO_START) {
+        if (!enabled) {
             log.info("爬虫自动启动已禁用");
             return;
         }
@@ -47,13 +74,13 @@ public class CrawlerAutoStartConfig implements CommandLineRunner {
                 
                 log.info("========================================");
                 log.info("开始自动启动爬虫任务");
-                log.info("参数: query={}, cityCode={}, maxPages={}", DEFAULT_QUERY, DEFAULT_CITY_CODE, DEFAULT_MAX_PAGES);
+                log.info("参数: query={}, cityCode={}, maxPages={}", query, cityCode, maxPages);
                 log.info("========================================");
                 
-                String startUrl = "https://www.zhipin.com/web/geek/job?query=" + DEFAULT_QUERY + "&city=" + DEFAULT_CITY_CODE;
+                String startUrl = "https://www.zhipin.com/web/geek/job?query=" + query + "&city=" + cityCode;
                 
                 // 初始化爬虫
-                crawlerService.initialize(startUrl, DEFAULT_QUERY, DEFAULT_CITY_CODE, DEFAULT_MAX_PAGES);
+                crawlerService.initialize(startUrl, query, cityCode, maxPages);
                 
                 // 开始爬取
                 crawlerService.crawl(startUrl);
