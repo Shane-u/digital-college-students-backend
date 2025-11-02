@@ -95,6 +95,12 @@ crawler:
     query: "Java"  # 默认搜索关键词
     city-code: "101270100"  # 默认城市代码（成都）
     max-pages: 40  # 默认最大页数
+# 硅基流动 AI 配置
+silicon-flow:
+  api-key: yours-apikey  # API密钥，需要替换为实际的API Key
+  base-url: https://api.siliconflow.cn/v1  # API基础URL
+  model: Qwen/Qwen3-30B-A3B-Instruct-2507  # 默认模型
+  timeout: 30000  # 请求超时时间（毫秒）
 # 接口文档配置
 knife4j:
   enable: true
