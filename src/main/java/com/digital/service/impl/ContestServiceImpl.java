@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 public class ContestServiceImpl extends ServiceImpl<ContestMapper, Contest> implements ContestService {
 
     private static final String API_BASE_URL = "https://apiv4buffer.saikr.com/api/pc/contest/lists";
+    private static final String API_DETAIL_URL = "https://apiv4buffer.saikr.com/api/pc/contest/info";
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -365,6 +366,79 @@ public class ContestServiceImpl extends ServiceImpl<ContestMapper, Contest> impl
         contestVOPage.setRecords(contestVOList);
         
         return contestVOPage;
+    }
+
+    @Override
+    public Object getContestDetail(Long contestId) {
+        try {
+            // 从数据库查询竞赛信息
+            Contest contest = this.getOne(new QueryWrapper<Contest>().eq("contestId", contestId));
+            if (contest == null) {
+                throw new RuntimeException("竞赛不存在，contestId: " + contestId);
+            }
+
+            // 获取contestUrl并去掉"vse/"前缀
+            String contestUrl = contest.getContestUrl();
+            if (StringUtils.isBlank(contestUrl)) {
+                throw new RuntimeException("竞赛URL为空，contestId: " + contestId);
+            }
+
+            // 去掉"vse/"前缀
+            String urlParam = contestUrl;
+            if (contestUrl.startsWith("vse/")) {
+                urlParam = contestUrl.substring(4); // 去掉"vse/"
+            }
+
+            // 构建API URL
+            String apiUrl = API_DETAIL_URL + "?contest_url=" + URLEncoder.encode(urlParam, StandardCharsets.UTF_8.toString());
+            log.info("获取竞赛详情，contestId={}, urlParam={}, apiUrl={}", contestId, urlParam, apiUrl);
+
+            // 发送HTTP请求
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                    .addHeader("Accept", "application/json")
+                    .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    log.error("API请求失败，状态码: {}", response.code());
+                    throw new RuntimeException("API请求失败，状态码: " + response.code());
+                }
+
+                String responseBody = response.body().string();
+                log.debug("API响应: {}", responseBody);
+
+                // 解析JSON响应
+                JsonNode rootNode = objectMapper.readTree(responseBody);
+
+                // 检查响应码
+                if (rootNode.has("code")) {
+                    int code = rootNode.get("code").asInt();
+                    if (code != 200) {
+                        String msg = rootNode.has("msg") ? rootNode.get("msg").asText() : "未知错误";
+                        log.error("API返回错误，code: {}, msg: {}", code, msg);
+                        throw new RuntimeException("API返回错误: " + msg);
+                    }
+                }
+
+                // 获取data对象并转换为Map返回（全量返回）
+                JsonNode dataNode = rootNode.get("data");
+                if (dataNode == null) {
+                    log.warn("API响应中没有data对象");
+                    throw new RuntimeException("API响应中没有data对象");
+                }
+
+                // 将JsonNode转换为Map，这样可以全量返回所有字段
+                return objectMapper.convertValue(dataNode, java.util.Map.class);
+            }
+        } catch (IOException e) {
+            log.error("获取竞赛详情时发生IO异常", e);
+            throw new RuntimeException("获取竞赛详情失败: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("获取竞赛详情失败", e);
+            throw new RuntimeException("获取竞赛详情失败: " + e.getMessage());
+        }
     }
 }
 

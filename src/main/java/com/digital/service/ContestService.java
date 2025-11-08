@@ -49,5 +49,13 @@ public interface ContestService extends IService<Contest> {
      * @return 分页结果
      */
     Page<ContestVO> listContestVOByPage(ContestQueryRequest contestQueryRequest);
+
+    /**
+     * 获取竞赛详情
+     *
+     * @param contestId 竞赛ID（数据库中的contestId字段）
+     * @return 竞赛详情（API返回的data部分）
+     */
+    Object getContestDetail(Long contestId);
 }
 

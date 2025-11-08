@@ -42,6 +42,12 @@ spring:
       # 大小限制
       max-file-size: -1
       max-request-size: -1
+  # MongoDB配置
+  data:
+    mongodb:
+      uri: mongodb://47.109.65.166:27017/digital_chat?authSource=admin
+      username: root
+      password: Zs123456
 server:
   address: 0.0.0.0
   port: 8121
@@ -92,7 +98,7 @@ cos:
 # 爬虫配置
 crawler:
   auto-start:
-    enabled: false  # 是否自动启动爬虫，false=禁用，true=启用
+    enabled: true  # 是否自动启动爬虫，false=禁用，true=启用
     query: "Java"  # 默认搜索关键词
     city-code: "101270100"  # 默认城市代码（成都）
     max-pages: 40  # 默认最大页数
@@ -126,3 +132,9 @@ minio:
     expire-days: 30 # 过期天数（超过30天的⽂件清理）
     ignore-prefixes: test_,temp_ # 忽略前缀（这些⽂件不清理，多前缀⽤逗号分隔）
     max-batch-size: 100 # 批量删除数量（避免Minio压⼒过⼤）
+# 火山引擎Doubao配置
+doubao:
+  api-key: 95c87328-e0d0-4127-83f9-d1fc421bdcc7
+  base-url: https://ark.cn-beijing.volces.com/api/v3
+  model: doubao-seed-1-6-251015
+  timeout: 60000 # 请求超时时间（毫秒）

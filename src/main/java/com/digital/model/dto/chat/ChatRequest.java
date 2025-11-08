@@ -44,5 +44,15 @@ public class ChatRequest implements Serializable {
      * Top-p 采样参数
      */
     private Double topP;
+
+    /**
+     * 会话ID（用于关联历史对话）
+     */
+    private String sessionId;
+
+    /**
+     * 用户ID（用于隔离聊天记录）
+     */
+    private Long userId;
 }
 

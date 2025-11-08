@@ -4,6 +4,9 @@ import com.digital.common.BaseResponse;
 import com.digital.common.ResultUtils;
 import com.digital.model.dto.chat.ChatRequest;
 import com.digital.model.dto.chat.ChatResponse;
+import com.digital.model.dto.chat.ChatSessionRequest;
+import com.digital.model.vo.ChatMessageVO;
+import com.digital.model.vo.ChatSessionVO;
 import com.digital.service.ChatService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +18,7 @@ import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 /**
  * 聊天控制器
@@ -159,6 +163,60 @@ public class ChatController {
                 log.error("写入错误响应失败", ex);
             }
         }
+    }
+
+    /**
+     * 创建聊天会话
+     *
+     * @param request 创建会话请求
+     * @return 会话VO
+     */
+    @PostMapping("/sessions")
+    public BaseResponse<ChatSessionVO> createSession(@RequestBody ChatSessionRequest request) {
+        ChatSessionVO session = chatService.createSession(request);
+        return ResultUtils.success(session);
+    }
+
+    /**
+     * 获取用户的会话列表
+     *
+     * @param userId 用户ID
+     * @return 会话列表
+     */
+    @GetMapping("/sessions")
+    public BaseResponse<List<ChatSessionVO>> getSessions(@RequestParam Long userId) {
+        List<ChatSessionVO> sessions = chatService.getSessions(userId);
+        return ResultUtils.success(sessions);
+    }
+
+    /**
+     * 获取会话的消息列表
+     *
+     * @param sessionId 会话ID
+     * @param userId 用户ID
+     * @return 消息列表
+     */
+    @GetMapping("/sessions/{sessionId}/messages")
+    public BaseResponse<List<ChatMessageVO>> getMessages(
+            @PathVariable String sessionId,
+            @RequestParam Long userId) {
+        List<ChatMessageVO> messages = chatService.getMessages(sessionId, userId);
+        return ResultUtils.success(messages);
+    }
+
+    /**
+     * 删除会话（软删除）
+     *
+     * @param sessionId 会话ID
+     * @param userId 用户ID
+     * @return 操作结果
+     */
+    @DeleteMapping("/sessions/{sessionId}")
+    public BaseResponse<Void> deleteSession(
+            @PathVariable String sessionId,
+            @RequestParam Long userId) {
+        chatService.deleteSession(sessionId, userId);
+        return ResultUtils.success(null);
     }
 }
 
