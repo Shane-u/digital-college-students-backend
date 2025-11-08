@@ -133,6 +133,7 @@ public class GrowthRecordServiceImpl extends ServiceImpl<GrowthRecordMapper, Gro
         // 统计照片总数
         QueryWrapper<GrowthImage> imageQueryWrapper = new QueryWrapper<>();
         imageQueryWrapper.eq("userId", userId);
+        imageQueryWrapper.eq("type",2);
         Long imageCount = growthImageMapper.selectCount(imageQueryWrapper);
         statistics.setImageCount(imageCount);
 

@@ -1,9 +1,13 @@
 package com.digital.manager;
 
 import com.digital.config.MinioConfig;
+import io.minio.BucketExistsArgs;
+import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
+import io.minio.SetBucketPolicyArgs;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -34,6 +38,67 @@ public class MinioManager {
 
     @Resource(name = "fileProcessExecutor")
     private ExecutorService fileProcessExecutor;
+
+    /**
+     * 应用启动时初始化：确保 bucket 存在并设置为公开访问
+     */
+    @PostConstruct
+    public void initBucket() {
+        try {
+            String bucketName = minioConfig.getBucketName();
+            
+            // 检查 bucket 是否存在
+            boolean exists = minioClient.bucketExists(BucketExistsArgs.builder()
+                    .bucket(bucketName)
+                    .build());
+            
+            if (!exists) {
+                // 创建 bucket
+                minioClient.makeBucket(MakeBucketArgs.builder()
+                        .bucket(bucketName)
+                        .build());
+                log.info("Bucket {} 创建成功", bucketName);
+            }
+            
+            // 设置 bucket 为公开读取
+            setBucketPublicRead();
+        } catch (Exception e) {
+            log.error("初始化 Minio bucket 失败", e);
+        }
+    }
+
+    /**
+     * 设置 bucket 为公开读取
+     * 允许所有人读取 bucket 中的文件
+     */
+    public void setBucketPublicRead() {
+        try {
+            String bucketName = minioConfig.getBucketName();
+            
+            // 设置 bucket 策略为公开读取
+            String policy = "{\n" +
+                    "  \"Version\": \"2012-10-17\",\n" +
+                    "  \"Statement\": [\n" +
+                    "    {\n" +
+                    "      \"Effect\": \"Allow\",\n" +
+                    "      \"Principal\": {\"AWS\": [\"*\"]},\n" +
+                    "      \"Action\": [\"s3:GetObject\"],\n" +
+                    "      \"Resource\": [\"arn:aws:s3:::" + bucketName + "/*\"]\n" +
+                    "    }\n" +
+                    "  ]\n" +
+                    "}";
+            
+            minioClient.setBucketPolicy(SetBucketPolicyArgs.builder()
+                    .bucket(bucketName)
+                    .config(policy)
+                    .build());
+            
+            log.info("Bucket {} 已设置为公开读取", bucketName);
+        } catch (Exception e) {
+            log.error("设置 bucket 公开访问失败", e);
+            // 不抛出异常，避免影响应用启动
+        }
+    }
 
     /**
      * 计算文件的默克尔树 MD5 值
@@ -173,8 +238,26 @@ public class MinioManager {
                             .contentType(contentType)
                             .build()
             );
-            // 返回文件访问地址
-            return minioConfig.getEndpoint() + "/" + minioConfig.getBucketName() + "/" + objectName;
+            // 返回文件访问地址（使用 Minio API 格式，9003 端口）
+            String endpoint = minioConfig.getEndpoint();
+            // 如果 endpoint 包含 9002，替换为 9003
+            if (endpoint.contains(":9002")) {
+                endpoint = endpoint.replace(":9002", ":9003");
+            }
+            // 移除 endpoint 末尾的斜杠
+            endpoint = endpoint.replaceAll("/+$", "");
+            
+            // 使用 Minio API 格式：/api/v1/buckets/{bucket}/objects/download?preview=true&prefix={objectName}
+            try {
+                String encodedObjectName = java.net.URLEncoder.encode(objectName, "UTF-8");
+                return endpoint + "/api/v1/buckets/" + minioConfig.getBucketName() 
+                        + "/objects/download?preview=true&prefix=" + encodedObjectName;
+            } catch (Exception e) {
+                log.error("URL 编码失败: {}", objectName, e);
+                // 如果编码失败，使用未编码的版本
+                return endpoint + "/api/v1/buckets/" + minioConfig.getBucketName() 
+                        + "/objects/download?preview=true&prefix=" + objectName;
+            }
         } catch (Exception e) {
             log.error("上传文件到 Minio 失败: {}", objectName, e);
             throw new RuntimeException("上传文件失败", e);
@@ -201,19 +284,38 @@ public class MinioManager {
     }
 
     /**
-     * 获取文件访问地址
+     * 获取文件访问地址（使用 Minio API 格式）
      *
      * @param objectName 对象名称（文件路径）
-     * @return 文件访问地址
+     * @return 文件访问地址（使用 Minio API 格式，9003 端口）
      */
     public String getFileUrl(String objectName) {
-        return minioConfig.getEndpoint() + "/" + minioConfig.getBucketName() + "/" + objectName;
+        String endpoint = minioConfig.getEndpoint();
+        // 如果 endpoint 包含 9002，替换为 9003
+        if (endpoint.contains(":9002")) {
+            endpoint = endpoint.replace(":9002", ":9003");
+        }
+        // 移除 endpoint 末尾的斜杠
+        endpoint = endpoint.replaceAll("/+$", "");
+        
+        // 使用 Minio API 格式：/api/v1/buckets/{bucket}/objects/download?preview=true&prefix={objectName}
+        try {
+            String encodedObjectName = java.net.URLEncoder.encode(objectName, "UTF-8");
+            return endpoint + "/api/v1/buckets/" + minioConfig.getBucketName() 
+                    + "/objects/download?preview=true&prefix=" + encodedObjectName;
+        } catch (Exception e) {
+            log.error("URL 编码失败: {}", objectName, e);
+            // 如果编码失败，使用未编码的版本
+            return endpoint + "/api/v1/buckets/" + minioConfig.getBucketName() 
+                    + "/objects/download?preview=true&prefix=" + objectName;
+        }
     }
 
     /**
      * 从文件 URL 中提取 objectName
-     * URL 格式：http://host:port/bucketName/objectName
-     * 例如：http://47.109.65.166:9003/digital/files/xxx/xxx.jpg
+     * 支持两种 URL 格式：
+     * 1. Minio API 格式：http://host:port/api/v1/buckets/bucketName/objects/download?preview=true&prefix=objectName
+     * 2. 直接访问格式：http://host:port/bucketName/objectName
      *
      * @param fileUrl 文件访问地址
      * @return objectName（文件路径）
@@ -223,8 +325,32 @@ public class MinioManager {
             return null;
         }
         try {
-            // 查找 bucketName 后面的部分
             String bucketName = minioConfig.getBucketName();
+            
+            // 优先处理 Minio API 格式
+            String apiPattern = "/api/v1/buckets/" + bucketName + "/objects/download";
+            int apiIndex = fileUrl.indexOf(apiPattern);
+            if (apiIndex >= 0) {
+                // 提取 prefix 参数
+                int prefixIndex = fileUrl.indexOf("prefix=");
+                if (prefixIndex >= 0) {
+                    String prefixPart = fileUrl.substring(prefixIndex + 7); // "prefix=" 长度是 7
+                    // 移除可能的其他参数
+                    int andIndex = prefixPart.indexOf("&");
+                    if (andIndex >= 0) {
+                        prefixPart = prefixPart.substring(0, andIndex);
+                    }
+                    // URL 解码
+                    try {
+                        return java.net.URLDecoder.decode(prefixPart, "UTF-8");
+                    } catch (Exception e) {
+                        log.warn("URL 解码失败: {}", prefixPart, e);
+                        return prefixPart;
+                    }
+                }
+            }
+            
+            // 处理直接访问格式：http://host:port/bucketName/objectName
             String searchPattern = "/" + bucketName + "/";
             int bucketIndex = fileUrl.indexOf(searchPattern);
             if (bucketIndex >= 0) {
@@ -237,6 +363,7 @@ public class MinioManager {
                 }
                 return objectName;
             }
+            
             log.warn("无法从 URL 中提取 objectName，未找到 bucketName '{}': {}", bucketName, fileUrl);
             return null;
         } catch (Exception e) {
