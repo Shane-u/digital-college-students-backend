@@ -3,6 +3,7 @@ package com.digital.controller;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.digital.common.BaseResponse;
+import com.digital.common.BatchDeleteRequest;
 import com.digital.common.DeleteRequest;
 import com.digital.common.ErrorCode;
 import com.digital.common.ResultUtils;
@@ -88,7 +89,7 @@ public class GrowthRecordController {
         }
         User loginUser = userService.getLoginUser(request);
         try {
-            // 读取文件内容（可以并行处理）
+            // 读取文件内容
             byte[] fileBytes = file.getBytes();
             InputStream inputStream = new ByteArrayInputStream(fileBytes);
 
@@ -156,7 +157,7 @@ public class GrowthRecordController {
         }
         User loginUser = userService.getLoginUser(request);
         try {
-            // 读取文件内容（可以并行处理）
+            // 读取文件内容
             byte[] fileBytes = file.getBytes();
             InputStream inputStream = new ByteArrayInputStream(fileBytes);
 
@@ -598,6 +599,76 @@ public class GrowthRecordController {
         // minioManager.removeObject(image.getImageUrl());
         boolean result = growthImageMapper.deleteById(id) > 0;
         return ResultUtils.success(result);
+    }
+
+    /**
+     * 批量删除图片
+     *
+     * @param batchDeleteRequest 批量删除请求（包含图片ID列表）
+     * @param request            HTTP 请求
+     * @return 删除成功的数量
+     */
+    @PostMapping("/image/batch-delete")
+    public BaseResponse<Integer> batchDeleteImages(@RequestBody BatchDeleteRequest batchDeleteRequest,
+            HttpServletRequest request) {
+        if (batchDeleteRequest == null || batchDeleteRequest.getIds() == null
+                || batchDeleteRequest.getIds().isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "图片ID列表不能为空");
+        }
+        User loginUser = userService.getLoginUser(request);
+        List<Long> ids = batchDeleteRequest.getIds();
+
+        // 验证所有图片是否存在且属于当前用户
+        List<GrowthImage> images = growthImageMapper.selectBatchIds(ids);
+        if (images.size() != ids.size()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "部分图片不存在");
+        }
+
+        // 检查权限：仅本人或管理员可删除
+        boolean isAdmin = userService.isAdmin(request);
+        for (GrowthImage image : images) {
+            if (!image.getUserId().equals(loginUser.getId()) && !isAdmin) {
+                throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权删除其他用户的图片");
+            }
+        }
+
+        // 批量删除（逻辑删除）
+        int deletedCount = 0;
+        for (Long id : ids) {
+            try {
+                // 查询图片信息，用于检查是否需要从 Minio 删除
+                GrowthImage image = growthImageMapper.selectById(id);
+                if (image != null) {
+                    // 检查是否还有其他记录使用这个图片
+                    QueryWrapper<GrowthImage> checkImageWrapper = new QueryWrapper<>();
+                    checkImageWrapper.eq("imageUrl", image.getImageUrl());
+                    checkImageWrapper.ne("id", image.getId());
+                    Long otherImageCount = growthImageMapper.selectCount(checkImageWrapper);
+
+                    // 如果没有其他记录使用这个图片，从 Minio 中删除
+                    if (otherImageCount == 0 && image.getImageUrl() != null && !image.getImageUrl().isEmpty()) {
+                        try {
+                            minioManager.removeObjectByUrl(image.getImageUrl());
+                            log.info("已从 Minio 删除图片: {}", image.getImageUrl());
+                        } catch (Exception e) {
+                            log.error("删除 Minio 图片失败: {}", image.getImageUrl(), e);
+                            // 继续删除数据库记录，不中断流程
+                        }
+                    }
+                }
+
+                // 删除数据库记录（逻辑删除）
+                int result = growthImageMapper.deleteById(id);
+                if (result > 0) {
+                    deletedCount++;
+                }
+            } catch (Exception e) {
+                log.error("删除图片失败: id={}", id, e);
+                // 继续删除其他图片，不中断流程
+            }
+        }
+
+        return ResultUtils.success(deletedCount);
     }
 
     /**
