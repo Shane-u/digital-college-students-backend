@@ -132,3 +132,41 @@ create table if not exists competition_category
     index idx_categoryId (categoryId),
     index idx_createTime (createTime)
 ) comment '竞赛分类表' collate = utf8mb4_unicode_ci;
+
+-- 竞赛表
+create table if not exists contest
+(
+    id                    bigint auto_increment comment 'id' primary key,
+    contestId             bigint                                 not null comment '竞赛ID（来自API）',
+    contestName           varchar(512)                           not null comment '竞赛名称',
+    contestUrl            varchar(512)                           null comment '竞赛URL',
+    isExam                int                                    null comment '是否为考试：0-否，2-是',
+    isContestStatus       int                                    null comment '竞赛状态',
+    registStartTime       bigint                                 null comment '报名开始时间（时间戳）',
+    registEndTime         bigint                                 null comment '报名结束时间（时间戳）',
+    contestStartTime      bigint                                 null comment '竞赛开始时间（时间戳）',
+    contestEndTime        bigint                                 null comment '竞赛结束时间（时间戳）',
+    thumbPic              varchar(1024)                          null comment '缩略图URL',
+    levelName             varchar(64)                            null comment '级别名称（校级/市级/省级等）',
+    organiser             varchar(512)                           null comment '主办方',
+    organiserName         varchar(128)                           null comment '主办方名称',
+    enterRange            varchar(128)                           null comment '参赛范围',
+    contestClassFirst     varchar(64)                            null comment '竞赛一级分类',
+    contestClassSecond    varchar(128)                           null comment '竞赛二级分类',
+    contestClassSecondId  int                                    null comment '竞赛二级分类ID（关联competition_category.categoryId）',
+    timeStatus            int                                    null comment '时间状态',
+    timeName              varchar(64)                            null comment '时间状态名称',
+    rank                  int                                    null comment '排名',
+    isNew                 int                                    null comment '是否新竞赛',
+    module                int                                    null comment '模块',
+    createTime            datetime     default CURRENT_TIMESTAMP not null comment '创建时间',
+    updateTime            datetime     default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
+    isDelete              tinyint      default 0                 not null comment '是否删除',
+    unique key uk_contestId (contestId),
+    index idx_contestClassSecondId (contestClassSecondId),
+    index idx_levelName (levelName),
+    index idx_timeStatus (timeStatus),
+    index idx_registStartTime (registStartTime),
+    index idx_contestStartTime (contestStartTime),
+    index idx_createTime (createTime)
+) comment '竞赛表' collate = utf8mb4_unicode_ci;
