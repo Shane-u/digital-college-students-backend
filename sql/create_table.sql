@@ -117,3 +117,18 @@ create table if not exists growth_image
     index idx_uploadTime (uploadTime),
     index idx_createTime (createTime)
 ) comment '图片表' collate = utf8mb4_unicode_ci;
+
+-- 竞赛分类表
+create table if not exists competition_category
+(
+    id           bigint auto_increment comment 'id' primary key,
+    parentName   varchar(256)                           not null comment '父项目名字',
+    categoryName varchar(256)                           not null comment '当前项目名字',
+    categoryId   int                                    not null comment '当前项目的id',
+    createTime   datetime     default CURRENT_TIMESTAMP not null comment '创建时间',
+    updateTime   datetime     default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
+    isDelete     tinyint      default 0                 not null comment '是否删除',
+    index idx_parentName (parentName),
+    index idx_categoryId (categoryId),
+    index idx_createTime (createTime)
+) comment '竞赛分类表' collate = utf8mb4_unicode_ci;
