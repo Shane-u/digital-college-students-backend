@@ -13,9 +13,9 @@ spring:
   # 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/digital_college_students_backend
-    username: root
-    password: Jkm20040716. # 需要修改为自己的数据库密码，后续会部署服务器
+    url: jdbc:mysql://47.109.65.166:3306/digital
+    username: digital
+    password: digital0123 # 需要修改为自己的数据库密码，后续会部署服务器
   # 邮件配置
   mail:
     host: smtp.163.com
@@ -40,7 +40,8 @@ spring:
   servlet:
     multipart:
       # 大小限制
-      max-file-size: 10MB
+      max-file-size: -1
+      max-request-size: -1
 server:
   address: 0.0.0.0
   port: 8121
@@ -91,7 +92,7 @@ cos:
 # 爬虫配置
 crawler:
   auto-start:
-    enabled: true  # 是否自动启动爬虫，false=禁用，true=启用
+    enabled: false  # 是否自动启动爬虫，false=禁用，true=启用
     query: "Java"  # 默认搜索关键词
     city-code: "101270100"  # 默认城市代码（成都）
     max-pages: 40  # 默认最大页数
@@ -112,3 +113,16 @@ knife4j:
         api-rule: package
         api-rule-resources:
           - com.digital
+# Minio核⼼配置
+minio:
+  endpoint: http://47.109.65.166:9002 # 服务地址
+  access-key: admin # 账号
+  secret-key: 12345678 # 密码
+  bucket-name: digital # 存储桶名
+  # 清理规则配置
+  clean:
+    enabled: true # 是否开启清理任务
+    cron: 0 0 2 * * ? # 执⾏时间（每天凌晨2点，Cron表达式）
+    expire-days: 30 # 过期天数（超过30天的⽂件清理）
+    ignore-prefixes: test_,temp_ # 忽略前缀（这些⽂件不清理，多前缀⽤逗号分隔）
+    max-batch-size: 100 # 批量删除数量（避免Minio压⼒过⼤）
