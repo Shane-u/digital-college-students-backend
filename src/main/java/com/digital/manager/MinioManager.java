@@ -36,7 +36,7 @@ public class MinioManager {
     private ExecutorService fileProcessExecutor;
 
     /**
-     * 计算文件的默克尔树 MD5 值（并行优化版本）
+     * 计算文件的默克尔树 MD5 值
      * 使用默克尔树的方式计算 MD5，支持秒传功能
      * 使用多线程并行计算每个分块的 MD5，提高大文件处理速度
      *
@@ -46,7 +46,7 @@ public class MinioManager {
      */
     public String calculateMerkleTreeMd5(InputStream inputStream, int chunkSize) {
         try {
-            // 读取所有分块数据到内存（对于大文件，可以考虑流式处理）
+            // 读取所有分块数据到内存
             List<byte[]> chunks = new ArrayList<>();
             byte[] buffer = new byte[chunkSize];
             int bytesRead;
@@ -82,7 +82,7 @@ public class MinioManager {
                     .map(CompletableFuture::join)
                     .collect(Collectors.toList());
 
-            // 第二步：构建默克尔树，合并相邻的 MD5 值（也可以并行优化）
+            // 第二步：构建默克尔树，合并相邻的 MD5 值
             List<String> currentLevel = chunkMd5List;
             while (currentLevel.size() > 1) {
                 final List<String> current = currentLevel; // 使用 final 变量
