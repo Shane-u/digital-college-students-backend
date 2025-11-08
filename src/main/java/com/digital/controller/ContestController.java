@@ -109,5 +109,24 @@ public class ContestController {
             return ResultUtils.error(500, "查询竞赛列表失败: " + e.getMessage());
         }
     }
+
+    /**
+     * 获取竞赛详情
+     *
+     * @param contestId 竞赛ID（数据库中的contestId字段）
+     * @return 竞赛详情（API返回的data部分，全量返回）
+     */
+    @GetMapping("/detail")
+    public BaseResponse<Object> getContestDetail(@RequestParam Long contestId) {
+        try {
+            log.info("获取竞赛详情，contestId={}", contestId);
+            Object detail = contestService.getContestDetail(contestId);
+            log.info("成功获取竞赛详情，contestId={}", contestId);
+            return ResultUtils.success(detail);
+        } catch (Exception e) {
+            log.error("获取竞赛详情失败，contestId={}", contestId, e);
+            return ResultUtils.error(500, "获取竞赛详情失败: " + e.getMessage());
+        }
+    }
 }
 
