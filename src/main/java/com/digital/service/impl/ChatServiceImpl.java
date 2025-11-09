@@ -378,7 +378,7 @@ public class ChatServiceImpl implements ChatService {
             boolean hasContent = StringUtils.isNotBlank(message.getContent()) ||
                     (message.getImageUrls() != null && !message.getImageUrls().isEmpty()) ||
                     (message.getVideoUrls() != null && !message.getVideoUrls().isEmpty()) ||
-                    (message.getContentList() != null && !message.getContentList().isEmpty());
+                    (message.retrieveContentList() != null && !message.retrieveContentList().isEmpty());
             
             ThrowUtils.throwIf(!hasContent, 
                     ErrorCode.PARAMS_ERROR, "消息内容不能为空");
