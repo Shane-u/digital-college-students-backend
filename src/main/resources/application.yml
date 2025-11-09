@@ -99,7 +99,7 @@ cos:
 crawler:
   auto-start:
     enabled: true  # 是否自动启动爬虫，false=禁用，true=启用
-    query: "Java"  # 默认搜索关键词
+    query: "Python"  # 默认搜索关键词
     city-code: "101270100"  # 默认城市代码（成都）
     max-pages: 40  # 默认最大页数
 # 硅基流动 AI 配置
