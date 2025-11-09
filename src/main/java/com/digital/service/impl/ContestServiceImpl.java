@@ -321,8 +321,74 @@ public class ContestServiceImpl extends ServiceImpl<ContestMapper, Contest> impl
             queryWrapper.orderBy(SqlUtils.validSortField(sortField), 
                     sortOrder.equals("asc"), sortField);
         } else {
+            // 默认按创建时间正序
+            queryWrapper.orderByAsc("createTime");
+        }
+
+        return queryWrapper;
+    }
+
+
+    @Override
+    public QueryWrapper<Contest> getHonorQueryWrapper(ContestQueryRequest contestQueryRequest) {
+        QueryWrapper<Contest> queryWrapper = new QueryWrapper<>();
+        if (contestQueryRequest == null) {
+            return queryWrapper;
+        }
+
+        String contestName = contestQueryRequest.getContestName();
+        String classId = contestQueryRequest.getClassId();
+        Integer level = contestQueryRequest.getLevel();
+        Integer timeStatus = contestQueryRequest.getTimeStatus();
+        String sortField = contestQueryRequest.getSortField();
+        String sortOrder = contestQueryRequest.getSortOrder();
+
+        // 竞赛名称模糊查询
+        if (StringUtils.isNotBlank(contestName)) {
+            queryWrapper.like("contestName", contestName);
+        }
+
+        // 分类ID查询（支持多个，用逗号分隔）
+        if (StringUtils.isNotBlank(classId)) {
+            String[] classIds = classId.split(",");
+            if (classIds.length == 1) {
+                queryWrapper.eq("contestClassSecondId", Integer.parseInt(classIds[0].trim()));
+            } else {
+                List<Integer> classIdList = new ArrayList<>();
+                for (String id : classIds) {
+                    try {
+                        classIdList.add(Integer.parseInt(id.trim()));
+                    } catch (NumberFormatException e) {
+                        log.warn("无效的分类ID: {}", id);
+                    }
+                }
+                if (!classIdList.isEmpty()) {
+                    queryWrapper.in("contestClassSecondId", classIdList);
+                }
+            }
+        }
+
+        // 级别查询（level为0时不筛选，其他值转换为中文进行查询）
+        if (level != null && level > 0) {
+            String[] levelNames = {"不限", "校级", "市级", "省级", "全国性", "全球性", "自由", "其他"};
+            if (level < levelNames.length) {
+                queryWrapper.eq("levelName", levelNames[level]);
+            }
+        }
+        // level为0或null时不添加级别筛选条件，查询所有级别
+
+        // 时间状态查询
+        if (timeStatus != null) {
+            queryWrapper.eq("timeStatus", timeStatus);
+        }
+
+        // 排序
+        if (StringUtils.isNotBlank(sortField)) {
+            queryWrapper.orderBy(SqlUtils.validSortField(sortField),
+                    sortOrder.equals("asc"), sortField);
+        } else {
             // 默认按创建时间倒序
-            queryWrapper.orderByDesc("createTime");
+            queryWrapper.orderByDesc("registStartTime");
         }
 
         return queryWrapper;
@@ -368,6 +434,36 @@ public class ContestServiceImpl extends ServiceImpl<ContestMapper, Contest> impl
         return contestVOPage;
     }
 
+
+    @Override
+    public Page<ContestVO> listHonorContestVOByPage(ContestQueryRequest contestQueryRequest) {
+        if (contestQueryRequest == null) {
+            throw new RuntimeException("查询参数不能为空");
+        }
+
+        long current = contestQueryRequest.getCurrent();
+        long size = contestQueryRequest.getPageSize();
+
+        // 限制爬虫
+        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
+
+        // 构建查询条件
+        QueryWrapper<Contest> queryWrapper = this.getHonorQueryWrapper(contestQueryRequest);
+        log.debug("查询条件: {}", queryWrapper);
+
+        // 执行数据库分页查询（this.page() 会执行SQL查询）
+        Page<Contest> contestPage = this.page(new Page<>(current, size), queryWrapper);
+        log.info("从数据库查询到 {} 条竞赛记录，总数: {}", contestPage.getRecords().size(), contestPage.getTotal());
+
+        // 转换为VO对象
+        Page<ContestVO> contestVOPage = new Page<>(current, size, contestPage.getTotal());
+        List<ContestVO> contestVOList = contestPage.getRecords().stream()
+                .map(this::getContestVO)
+                .collect(java.util.stream.Collectors.toList());
+        contestVOPage.setRecords(contestVOList);
+
+        return contestVOPage;
+    }
     @Override
     public Object getContestDetail(Long contestId) {
         try {

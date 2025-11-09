@@ -15,6 +15,7 @@
     <name>digital</name>
     <properties>
         <java.version>17</java.version>
+<!--        <langgraph4j.version>1.6.0-beta6</langgraph4j.version>-->
     </properties>
     <dependencies>
 
@@ -190,21 +191,25 @@
             </exclusion>
         </exclusions>
         </dependency>
-        <!-- MongoDB -->
+<!--        &lt;!&ndash; LangGraph4j BOM &ndash;&gt;-->
+<!--        <dependency>-->
+<!--            <groupId>org.bsc.langgraph4j</groupId>-->
+<!--            <artifactId>langgraph4j-bom</artifactId>-->
+<!--            <version>${langgraph4j.version}</version>-->
+<!--            <type>pom</type>-->
+<!--            <scope>import</scope>-->
+<!--        </dependency>-->
+        <!-- https://mvnrepository.com/artifact/org.bsc.langgraph4j/langgraph4j-core -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-mongodb</artifactId>
+            <groupId>org.bsc.langgraph4j</groupId>
+            <artifactId>langgraph4j-core</artifactId>
+            <version>1.5.12</version>
         </dependency>
-        <!-- LangChain4j -->
+        <!-- https://mvnrepository.com/artifact/org.bsc.langgraph4j/langgraph4j-langchain4j -->
         <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j</artifactId>
-            <version>0.29.1</version>
-        </dependency>
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-spring-boot-starter</artifactId>
-            <version>0.29.1</version>
+            <groupId>org.bsc.langgraph4j</groupId>
+            <artifactId>langgraph4j-langchain4j</artifactId>
+            <version>1.5.12</version>
         </dependency>
     </dependencies>
 

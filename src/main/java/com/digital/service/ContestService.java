@@ -35,6 +35,14 @@ public interface ContestService extends IService<Contest> {
     QueryWrapper<Contest> getQueryWrapper(ContestQueryRequest contestQueryRequest);
 
     /**
+     * 获取榜单竞赛查询条件
+     *
+     * @param contestQueryRequest 查询请求
+     * @return 查询条件
+     */
+    QueryWrapper<Contest> getHonorQueryWrapper(ContestQueryRequest contestQueryRequest);
+
+    /**
      * 获取竞赛封装
      *
      * @param contest 竞赛实体
@@ -49,6 +57,15 @@ public interface ContestService extends IService<Contest> {
      * @return 分页结果
      */
     Page<ContestVO> listContestVOByPage(ContestQueryRequest contestQueryRequest);
+
+
+    /**
+     * 分页查询榜单竞赛列表
+     *
+     * @param contestQueryRequest 查询请求
+     * @return 分页结果
+     */
+    Page<ContestVO> listHonorContestVOByPage(ContestQueryRequest contestQueryRequest);
 
     /**
      * 获取竞赛详情
