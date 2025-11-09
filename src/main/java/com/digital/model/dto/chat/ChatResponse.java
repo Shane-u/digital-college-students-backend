@@ -48,6 +48,11 @@ public class ChatResponse implements Serializable {
     private Usage usage;
 
     /**
+     * 会话ID（用于后续请求关联历史对话）
+     */
+    private String sessionId;
+
+    /**
      * 响应选择项
      */
     @Data

@@ -2,9 +2,11 @@ package com.digital.repository;
 
 import com.digital.model.entity.ChatSession;
 import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.mongodb.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 聊天会话Repository
@@ -24,12 +26,22 @@ public interface ChatSessionRepository extends MongoRepository<ChatSession, Stri
     List<ChatSession> findByUserIdAndIsDeleteOrderByUpdateTimeDesc(Long userId, Boolean isDelete);
 
     /**
+     * 根据会话ID查询会话
+     *
+     * @param id 会话ID
+     * @return 会话
+     */
+    Optional<ChatSession> findById(String id);
+
+    /**
      * 根据会话ID和用户ID查询会话
+     * 使用MongoDB查询注解确保正确查询
      *
      * @param id 会话ID
      * @param userId 用户ID
      * @return 会话
      */
+    @Query("{ '_id': ?0, 'userId': ?1 }")
     ChatSession findByIdAndUserId(String id, Long userId);
 }
 

@@ -74,11 +74,19 @@ public class ChatServiceImpl implements ChatService {
         // 调用Manager层执行聊天请求
         ChatResponse response = doubaoManager.chat(fullRequest);
 
+        // 设置sessionId到响应中，方便客户端后续使用
+        response.setSessionId(sessionId);
+
         // 保存AI回复
         saveAssistantMessage(response, sessionId, chatRequest.getUserId());
 
         // 更新会话时间
         updateSessionTime(sessionId);
+
+        log.info("聊天完成: sessionId={}, userId={}, 历史消息数={}, 当前消息数={}", 
+                sessionId, chatRequest.getUserId(), 
+                fullMessages.size() - chatRequest.getMessages().size(), 
+                chatRequest.getMessages().size());
 
         return response;
     }
@@ -138,9 +146,17 @@ public class ChatServiceImpl implements ChatService {
         String sessionId = chatRequest.getSessionId();
         if (StringUtils.isNotBlank(sessionId)) {
             // 验证会话是否存在且属于该用户
+            log.debug("查找会话: sessionId={}, userId={}", sessionId, userId);
             ChatSession session = chatSessionRepository.findByIdAndUserId(sessionId, userId);
-            ThrowUtils.throwIf(session == null || session.getIsDelete(), 
-                    ErrorCode.NOT_FOUND_ERROR, "会话不存在");
+            if (session == null) {
+                log.warn("会话不存在: sessionId={}, userId={}", sessionId, userId);
+                ThrowUtils.throwIf(true, ErrorCode.NOT_FOUND_ERROR, "会话不存在");
+            }
+            if (session.getIsDelete()) {
+                log.warn("会话已删除: sessionId={}, userId={}", sessionId, userId);
+                ThrowUtils.throwIf(true, ErrorCode.NOT_FOUND_ERROR, "会话不存在");
+            }
+            log.debug("找到会话: sessionId={}, userId={}, title={}", sessionId, userId, session.getTitle());
             return sessionId;
         }
 
@@ -157,8 +173,13 @@ public class ChatServiceImpl implements ChatService {
         session.setUpdateTime(LocalDateTime.now());
         session.setIsDelete(false);
         
-        chatSessionRepository.save(session);
-        log.info("创建新会话: sessionId={}, userId={}, title={}", session.getId(), userId, title);
+        try {
+            chatSessionRepository.save(session);
+            log.info("创建新会话成功: sessionId={}, userId={}, title={}", session.getId(), userId, title);
+        } catch (Exception e) {
+            log.error("创建新会话失败: userId={}, title={}", userId, title, e);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "创建会话失败: " + e.getMessage());
+        }
         
         return session.getId();
     }
@@ -198,6 +219,9 @@ public class ChatServiceImpl implements ChatService {
         List<ChatMessage> historyMessages = chatMessageRepository
                 .findBySessionIdAndUserIdAndIsDeleteOrderByCreateTimeAsc(
                         sessionId, chatRequest.getUserId(), false);
+
+        log.debug("加载历史消息: sessionId={}, userId={}, 历史消息数={}", 
+                sessionId, chatRequest.getUserId(), historyMessages.size());
 
         // 转换历史消息为Message对象
         for (ChatMessage historyMsg : historyMessages) {
@@ -289,18 +313,27 @@ public class ChatServiceImpl implements ChatService {
         // 只保存用户消息
         for (Message msg : chatRequest.getMessages()) {
             if ("user".equals(msg.getRole())) {
-                ChatMessage chatMessage = new ChatMessage();
-                chatMessage.setId(UUID.randomUUID().toString());
-                chatMessage.setSessionId(sessionId);
-                chatMessage.setUserId(chatRequest.getUserId());
-                chatMessage.setRole(msg.getRole());
-                chatMessage.setContent(msg.getContent());
-                chatMessage.setImageUrls(msg.getImageUrls());
-                chatMessage.setVideoUrls(msg.getVideoUrls());
-                chatMessage.setCreateTime(LocalDateTime.now());
-                chatMessage.setIsDelete(false);
-                
-                chatMessageRepository.save(chatMessage);
+                try {
+                    ChatMessage chatMessage = new ChatMessage();
+                    chatMessage.setId(UUID.randomUUID().toString());
+                    chatMessage.setSessionId(sessionId);
+                    chatMessage.setUserId(chatRequest.getUserId());
+                    chatMessage.setRole(msg.getRole());
+                    chatMessage.setContent(msg.getContent());
+                    chatMessage.setImageUrls(msg.getImageUrls());
+                    chatMessage.setVideoUrls(msg.getVideoUrls());
+                    chatMessage.setCreateTime(LocalDateTime.now());
+                    chatMessage.setIsDelete(false);
+                    
+                    chatMessageRepository.save(chatMessage);
+                    log.debug("保存用户消息成功: sessionId={}, messageId={}, content={}", 
+                            sessionId, chatMessage.getId(), 
+                            msg.getContent() != null ? msg.getContent().substring(0, Math.min(50, msg.getContent().length())) : "");
+                } catch (Exception e) {
+                    log.error("保存用户消息失败: sessionId={}, content={}", 
+                            sessionId, msg.getContent(), e);
+                    throw new BusinessException(ErrorCode.SYSTEM_ERROR, "保存用户消息失败: " + e.getMessage());
+                }
             }
         }
     }
@@ -311,19 +344,27 @@ public class ChatServiceImpl implements ChatService {
     private void saveAssistantMessage(ChatResponse response, String sessionId, Long userId) {
         String content = response.getContent();
         if (StringUtils.isBlank(content)) {
+            log.warn("AI回复内容为空，跳过保存: sessionId={}, userId={}", sessionId, userId);
             return;
         }
 
-        ChatMessage chatMessage = new ChatMessage();
-        chatMessage.setId(UUID.randomUUID().toString());
-        chatMessage.setSessionId(sessionId);
-        chatMessage.setUserId(userId);
-        chatMessage.setRole("assistant");
-        chatMessage.setContent(content);
-        chatMessage.setCreateTime(LocalDateTime.now());
-        chatMessage.setIsDelete(false);
-        
-        chatMessageRepository.save(chatMessage);
+        try {
+            ChatMessage chatMessage = new ChatMessage();
+            chatMessage.setId(UUID.randomUUID().toString());
+            chatMessage.setSessionId(sessionId);
+            chatMessage.setUserId(userId);
+            chatMessage.setRole("assistant");
+            chatMessage.setContent(content);
+            chatMessage.setCreateTime(LocalDateTime.now());
+            chatMessage.setIsDelete(false);
+            
+            chatMessageRepository.save(chatMessage);
+            log.debug("保存AI回复成功: sessionId={}, messageId={}, contentLength={}", 
+                    sessionId, chatMessage.getId(), content.length());
+        } catch (Exception e) {
+            log.error("保存AI回复失败: sessionId={}, userId={}", sessionId, userId, e);
+            // 不抛出异常，避免影响主流程
+        }
     }
 
     /**
@@ -331,19 +372,27 @@ public class ChatServiceImpl implements ChatService {
      */
     private void saveAssistantMessage(String content, String sessionId, Long userId) {
         if (StringUtils.isBlank(content)) {
+            log.warn("AI回复内容为空，跳过保存: sessionId={}, userId={}", sessionId, userId);
             return;
         }
 
-        ChatMessage chatMessage = new ChatMessage();
-        chatMessage.setId(UUID.randomUUID().toString());
-        chatMessage.setSessionId(sessionId);
-        chatMessage.setUserId(userId);
-        chatMessage.setRole("assistant");
-        chatMessage.setContent(content);
-        chatMessage.setCreateTime(LocalDateTime.now());
-        chatMessage.setIsDelete(false);
-        
-        chatMessageRepository.save(chatMessage);
+        try {
+            ChatMessage chatMessage = new ChatMessage();
+            chatMessage.setId(UUID.randomUUID().toString());
+            chatMessage.setSessionId(sessionId);
+            chatMessage.setUserId(userId);
+            chatMessage.setRole("assistant");
+            chatMessage.setContent(content);
+            chatMessage.setCreateTime(LocalDateTime.now());
+            chatMessage.setIsDelete(false);
+            
+            chatMessageRepository.save(chatMessage);
+            log.debug("保存AI回复成功: sessionId={}, messageId={}, contentLength={}", 
+                    sessionId, chatMessage.getId(), content.length());
+        } catch (Exception e) {
+            log.error("保存AI回复失败: sessionId={}, userId={}", sessionId, userId, e);
+            // 不抛出异常，避免影响主流程
+        }
     }
 
     /**
