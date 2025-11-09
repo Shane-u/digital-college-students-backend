@@ -110,6 +110,43 @@ public class ContestController {
         }
     }
 
+
+    /**
+     * 分页查询榜单竞赛列表（GET方式，方便前端调用）
+     *
+     * @param current     当前页（默认1）
+     * @param pageSize   每页数量（默认10）
+//     * @param classId    分类ID（多个用逗号分隔）
+     * @param contestName 竞赛名称（模糊查询）
+     * @param timeStatus  时间状态
+     * @return 分页结果
+     */
+    @GetMapping("/listHonor")
+    public BaseResponse<Page<ContestVO>> listHonorContests(
+            @RequestParam(required = false, defaultValue = "1") Integer current,
+            @RequestParam(required = false, defaultValue = "10") Integer pageSize,
+            @RequestParam(required = false) String classId,
+            @RequestParam(required = false) String contestName,
+            @RequestParam(required = false) Integer timeStatus) {
+        try {
+            ContestQueryRequest contestQueryRequest = new ContestQueryRequest();
+            contestQueryRequest.setCurrent(current);
+            contestQueryRequest.setPageSize(pageSize);
+            contestQueryRequest.setClassId(classId);
+            contestQueryRequest.setLevel(4);
+            contestQueryRequest.setContestName(contestName);
+            contestQueryRequest.setTimeStatus(timeStatus);
+
+            log.info("查询竞赛列表，参数: {}", contestQueryRequest);
+            Page<ContestVO> contestVOPage = contestService.listHonorContestVOByPage(contestQueryRequest);
+            log.info("成功查询到 {} 条竞赛数据", contestVOPage.getTotal());
+            return ResultUtils.success(contestVOPage);
+        } catch (Exception e) {
+            log.error("查询竞赛列表失败", e);
+            return ResultUtils.error(500, "查询竞赛列表失败: " + e.getMessage());
+        }
+    }
+
     /**
      * 获取竞赛详情
      *
