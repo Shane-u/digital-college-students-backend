@@ -19,11 +19,14 @@ import com.digital.service.UserService;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.util.Base64;
 import java.util.List;
 
 import com.digital.service.VerificationCodeService;
 import com.digital.utils.CaptchaUtils;
+import com.digital.manager.MinioManager;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -37,6 +40,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
 
 import static com.digital.service.impl.UserServiceImpl.SALT;
 
@@ -57,6 +62,9 @@ public class UserController {
 
     @Resource
     private VerificationCodeService verificationCodeService;
+
+    @Resource
+    private MinioManager minioManager;
 
     /**
      * 获取图形验证码
@@ -344,5 +352,29 @@ public class UserController {
         boolean result = userService.updateById(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
+    }
+
+    /**
+     * 头像上传（MinIO）
+     * 将图片上传到 MinIO 并返回可访问 URL
+     */
+    @PostMapping("/upload/avatar")
+    public BaseResponse<String> uploadAvatar(@RequestPart("file") MultipartFile file, HttpServletRequest request) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "图片不能为空");
+        }
+        User loginUser = userService.getLoginUser(request);
+        try {
+            byte[] fileBytes = file.getBytes();
+            InputStream inputStream = new ByteArrayInputStream(fileBytes);
+            // 计算 MD5，路径中带上 userId 做分隔
+            String md5 = minioManager.calculateMerkleTreeMd5(new ByteArrayInputStream(fileBytes), 2 * 1024 * 1024);
+            String objectName = "avatars/" + loginUser.getId() + "/" + md5 + "/" + file.getOriginalFilename();
+            String url = minioManager.putObject(objectName, inputStream, file.getContentType(), file.getSize());
+            return ResultUtils.success(url);
+        } catch (Exception e) {
+            log.error("头像上传失败", e);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "头像上传失败");
+        }
     }
 }
