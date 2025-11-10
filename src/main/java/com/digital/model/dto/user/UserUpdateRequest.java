@@ -35,5 +35,25 @@ public class UserUpdateRequest implements Serializable {
      */
     private String userRole;
 
+    /**
+     * 性别：男/女/保密
+     */
+    private String gender;
+
+    /**
+     * 年级
+     */
+    private String grade;
+
+    /**
+     * 专业
+     */
+    private String major;
+
+    /**
+     * 学校
+     */
+    private String school;
+
     private static final long serialVersionUID = 1L;
 }
