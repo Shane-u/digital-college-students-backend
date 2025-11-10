@@ -3,7 +3,9 @@ package com.digital.model.dto.chat;
 import lombok.Data;
 
 import java.io.Serializable;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 聊天请求 DTO
@@ -54,5 +56,10 @@ public class ChatRequest implements Serializable {
      * 用户ID（用于隔离聊天记录）
      */
     private Long userId;
+
+    /**
+     * 思考方式
+     */
+    private HashMap<String,String> thinking;
 }
 
