@@ -265,6 +265,29 @@ public class GrowthRecordController {
     }
 
     /**
+     * 照片墙 - 获取全部图片信息（含 type=1 与 type=2，按 uploadTime 倒序，不分页）
+     *
+     * @param request HTTP 请求
+     * @return 图片列表
+     */
+    @GetMapping("/photo-wall/list")
+    public BaseResponse<List<GrowthImageVO>> listPhotoWallImages(HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        QueryWrapper<GrowthImage> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("userId", loginUser.getId());
+        // 包含 type=1 和 type=2（无需额外条件，全部图片皆返回）
+        // 以用户选择的日历日期为准，对应 uploadTime 字段；按 uploadTime 倒序排列
+        queryWrapper.orderByDesc("uploadTime", "createTime");
+        List<GrowthImage> images = growthImageMapper.selectList(queryWrapper);
+        List<GrowthImageVO> imageVOList = images.stream().map(image -> {
+            GrowthImageVO imageVO = new GrowthImageVO();
+            BeanUtils.copyProperties(image, imageVO);
+            return imageVO;
+        }).collect(Collectors.toList());
+        return ResultUtils.success(imageVOList);
+    }
+
+    /**
      * 删除成长记录
      * 删除成长记录时，同时删除关联的图片和文件（Minio 中物理删除，数据库中逻辑删除）
      *
