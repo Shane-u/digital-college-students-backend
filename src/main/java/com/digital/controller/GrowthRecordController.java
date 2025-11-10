@@ -46,6 +46,8 @@ import java.io.InputStream;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Map;
+import java.util.Set;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -279,9 +281,29 @@ public class GrowthRecordController {
         // 以用户选择的日历日期为准，对应 uploadTime 字段；按 uploadTime 倒序排列
         queryWrapper.orderByDesc("uploadTime", "createTime");
         List<GrowthImage> images = growthImageMapper.selectList(queryWrapper);
+        
+        // 批量查询 type=2 的成长记录，构建 id -> eventDesc 映射，避免 N+1
+        Set<Long> recordIds = images.stream()
+                .filter(img -> img.getType() != null && img.getType() == 2 && img.getGrowthRecordId() != null)
+                .map(GrowthImage::getGrowthRecordId)
+                .collect(Collectors.toSet());
+        Map<Long, String> recordIdToEventDesc = recordIds.isEmpty()
+                ? java.util.Collections.emptyMap()
+                : growthRecordService.listByIds(recordIds).stream()
+                        .filter(r -> r != null && r.getId() != null)
+                        .collect(Collectors.toMap(GrowthRecord::getId, GrowthRecord::getEventDesc));
+
         List<GrowthImageVO> imageVOList = images.stream().map(image -> {
             GrowthImageVO imageVO = new GrowthImageVO();
+            image.setUploadTime(new Date(image.getUploadTime().getTime()+8*60*60*1000)); // 转为北京时间
             BeanUtils.copyProperties(image, imageVO);
+            // 如果是成长记录中的照片（type=2），将 imageName 设置为对应的 eventDesc；否则保留图片名
+            if (image.getType() != null && image.getGrowthRecordId() != null) {
+                String eventDesc = recordIdToEventDesc.get(image.getGrowthRecordId());
+                if (eventDesc != null && !eventDesc.isEmpty()) {
+                    imageVO.setImageName(eventDesc);
+                }
+            }
             return imageVO;
         }).collect(Collectors.toList());
         return ResultUtils.success(imageVOList);
@@ -577,7 +599,9 @@ public class GrowthRecordController {
         imageQueryWrapper.last("limit 1");
         GrowthImage latestImage = growthImageMapper.selectOne(imageQueryWrapper);
         if (latestImage != null && latestImage.getUploadTime() != null) {
-            statistics.setLatestRecordTime(latestImage.getUploadTime());
+            long eightHoursInMs = 8L * 60 * 60 * 1000;
+            Date adjustedTime = new Date(latestImage.getUploadTime().getTime() + eightHoursInMs);
+            statistics.setLatestRecordTime(adjustedTime);
         }
 
         // 计算总记录时长（最早上传时间 - 最晚上传时间）
