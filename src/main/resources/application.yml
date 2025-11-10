@@ -3,9 +3,9 @@ spring:
     name: digital-college-students-backend
   profiles:
     active: dev
-  mvc:
-    pathmatch:
-      matching-strategy: ant_path_matcher
+#  mvc:
+#    pathmatch:
+#      matching-strategy: ant_path_matcher
   # session 配置
   session:
     # 30 天过期
@@ -13,7 +13,7 @@ spring:
   # 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://47.109.65.166:3306/digital
+    url: jdbc:mysql://47.109.65.166:3306/digital?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true
     username: digital
     password: digital0123 # 需要修改为自己的数据库密码，后续会部署服务器
   # 邮件配置
