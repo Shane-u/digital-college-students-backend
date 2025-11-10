@@ -133,7 +133,20 @@ minio:
 # 火山引擎Doubao配置
 doubao:
   api-key: 95c87328-e0d0-4127-83f9-d1fc421bdcc7
-
   base-url: https://ark.cn-beijing.volces.com/api/v3
   model: doubao-seed-1-6-251015
+  timeout: 60000 # 请求超时时间（毫秒）
+
+# 火山引擎DeepSeek配置
+deepseek:
+  api-key: 95c87328-e0d0-4127-83f9-d1fc421bdcc7  # 需要替换为实际的API密钥
+  base-url: https://ark.cn-beijing.volces.com/api/v3
+  model: deepseek-v3-1-terminus
+  timeout: 60000 # 请求超时时间（毫秒）
+
+# 火山引擎Kimi配置
+kimi:
+  api-key: 95c87328-e0d0-4127-83f9-d1fc421bdcc7  # 需要替换为实际的API密钥
+  base-url: https://ark.cn-beijing.volces.com/api/v3
+  model: kimi-k2-250905
   timeout: 60000 # 请求超时时间（毫秒）

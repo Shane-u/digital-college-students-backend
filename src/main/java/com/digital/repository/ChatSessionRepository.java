@@ -35,13 +35,13 @@ public interface ChatSessionRepository extends MongoRepository<ChatSession, Stri
 
     /**
      * 根据会话ID和用户ID查询会话
-     * 使用MongoDB查询注解确保正确查询
+     * 使用MongoDB查询注解确保正确查询，同时验证未删除
      *
      * @param id 会话ID
      * @param userId 用户ID
      * @return 会话
      */
-    @Query("{ '_id': ?0, 'userId': ?1 }")
+    @Query("{ '_id': ?0, 'userId': ?1, 'isDelete': false }")
     ChatSession findByIdAndUserId(String id, Long userId);
 }
 
