@@ -148,3 +148,4 @@ fabric.properties
 
 .env
 .gitignore
+.DS_Store
