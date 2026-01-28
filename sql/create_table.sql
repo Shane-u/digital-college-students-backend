@@ -174,3 +174,25 @@ create table if not exists contest
     index idx_contestStartTime (contestStartTime),
     index idx_createTime (createTime)
 ) comment '竞赛表' collate = utf8mb4_unicode_ci;
+
+-- 记忆闪卡表
+create table if not exists flash_card
+(
+    id              bigint auto_increment comment '闪卡id' primary key,
+    userId          bigint                                 not null comment '用户id',
+    title           varchar(512)                           not null comment '知识点标题',
+    content         text                                   null comment '详细知识点内容（纯文本）',
+    htmlContent     longtext                               null comment '闪卡HTML内容（包含HTML+CSS+SVG动画）',
+    originalContent text                                   null comment '原始AI回答内容（用于生成闪卡的原始内容）',
+    nextReviewTime  datetime                               null comment '下次复习时间（遵循艾宾浩斯曲线）',
+    reviewCount     int          default 0                 not null comment '复习次数',
+    lastReviewTime  datetime                               null comment '最后复习时间',
+    difficultyLevel int                                    null comment '难度等级（1-重来，2-困难，3-良好，4-简单）',
+    createTime      datetime     default CURRENT_TIMESTAMP not null comment '创建时间',
+    updateTime      datetime     default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
+    isDelete        tinyint      default 0                 not null comment '是否删除',
+    index idx_userId (userId),
+    index idx_nextReviewTime (nextReviewTime),
+    index idx_reviewCount (reviewCount),
+    index idx_createTime (createTime)
+) comment '记忆闪卡表' collate = utf8mb4_unicode_ci;

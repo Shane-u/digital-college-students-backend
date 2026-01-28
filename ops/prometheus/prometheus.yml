@@ -1,0 +1,22 @@
+# 全局采集配置
+global:
+  scrape_interval: 15s  # 每15秒采集一次指标，按需调整
+  evaluation_interval: 15s
+
+# 采集规则
+scrape_configs:
+  # 采集SpringBoot后端指标
+  - job_name: 'digital-college-students-backend'
+    metrics_path: '/api/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8121']
+        labels:
+          service: 'digital-backend'
+          env: 'dev'
+
+  # 采集Prometheus自身指标
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'

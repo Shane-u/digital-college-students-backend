@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.digital.mapper.RecommendationResultMapper">
+
+    <!-- 获取用户的推荐结果 -->
+    <select id="getUserRecommendations" resultType="com.digital.model.entity.RecommendationResult">
+        SELECT *
+        FROM recommendation_result
+        WHERE userId = #{userId}
+          AND itemType = #{itemType}
+          AND isDelete = 0
+          AND (expireTime IS NULL OR expireTime > NOW())
+        ORDER BY score DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 删除过期的推荐结果 -->
+    <delete id="deleteExpiredRecommendations">
+        DELETE FROM recommendation_result
+        WHERE expireTime IS NOT NULL
+          AND expireTime &lt; #{expireTime}
+    </delete>
+
+</mapper>

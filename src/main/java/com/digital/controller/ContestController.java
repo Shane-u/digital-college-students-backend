@@ -42,7 +42,7 @@ public class ContestController {
             @RequestParam(required = false) Integer level,
             @RequestParam(required = false) Integer sort) {
         try {
-            log.info("开始爬取竞赛数据，page={}, limit={}, classId={}, level={}, sort={}", 
+            log.info("开始爬取竞赛数据，page={}, limit={}, classId={}, level={}, sort={}",
                     page, limit, classId, level, sort);
             int count = contestService.fetchAndSaveContests(page, limit, classId, level, sort);
             log.info("成功爬取并保存 {} 条竞赛数据", count);
@@ -116,7 +116,7 @@ public class ContestController {
      *
      * @param current     当前页（默认1）
      * @param pageSize   每页数量（默认10）
-//     * @param classId    分类ID（多个用逗号分隔）
+    //     * @param classId    分类ID（多个用逗号分隔）
      * @param contestName 竞赛名称（模糊查询）
      * @param timeStatus  时间状态
      * @return 分页结果
@@ -149,9 +149,8 @@ public class ContestController {
 
     /**
      * 获取竞赛详情
-     *
-     * @param contestId 竞赛ID（数据库中的contestId字段）
-     * @return 竞赛详情（API返回的data部分，全量返回）
+     * @param contestId 竞赛ID
+     * @return 竞赛详情
      */
     @GetMapping("/detail")
     public BaseResponse<Object> getContestDetail(@RequestParam Long contestId) {

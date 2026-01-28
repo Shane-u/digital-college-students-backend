@@ -16,6 +16,7 @@
     <properties>
         <java.version>17</java.version>
         <langchain4j.version>0.34.0</langchain4j.version>
+        <spring-ai.version>1.0.1</spring-ai.version>
 <!--        <langgraph4j.version>1.6.0-beta6</langgraph4j.version>-->
     </properties>
     
@@ -29,6 +30,30 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+                <exclusions>
+                    <!-- 排除 MCP 客户端自动配置依赖 -->
+                    <exclusion>
+                        <groupId>org.springframework.ai</groupId>
+                        <artifactId>spring-ai-autoconfigure-mcp-client</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>org.springframework.ai</groupId>
+                        <artifactId>spring-ai-mcp-client</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <!-- 统一 protobuf-java 版本 -->
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-java</artifactId>
+                <version>3.25.1</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
     
@@ -39,8 +64,21 @@
             <artifactId>spring-boot-starter-freemarker</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-client</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!-- WebSocket support -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
         <!-- WebFlux for reactive streaming -->
         <dependency>
@@ -205,6 +243,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- Prometheus metrics registry -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <!-- Minio客户端依赖（排除⾃带okhttp避免版本冲突） -->
         <dependency>
         <groupId>io.minio</groupId>
@@ -248,10 +291,61 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-mongodb</artifactId>
         </dependency>
+
+        <!-- Pull in as a traditional dependency -->
+        <dependency>
+            <groupId>com.konghq</groupId>
+            <artifactId>unirest-java</artifactId>
+            <version>3.13.2</version>
+        </dependency>
+
+        <!-- OR as a snazzy new standalone jar with shaded dependencies -->
+        <dependency>
+            <groupId>com.konghq</groupId>
+            <artifactId>unirest-java</artifactId>
+            <version>3.13.2</version>
+            <classifier>standalone</classifier>
+        </dependency>
+
+
+        <dependency>
+            <groupId>io.milvus</groupId>
+            <artifactId>milvus-sdk-java</artifactId>
+            <version>2.6.6</version>
+        </dependency>
+
+        <!-- 嵌入模型实现 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-embeddings-all-minilm-l6-v2</artifactId>
+            <version>1.0.0-beta3</version>
+        </dependency>
+
+        <!-- RAG增强组件 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-easy-rag</artifactId>
+            <version>1.0.0-beta3</version>
+        </dependency>
+
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-milvus</artifactId>
+            <version>1.0.0-beta3</version>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

@@ -36,8 +36,10 @@ public class SiliconFlowConfig {
 
     /**
      * 请求超时时间（毫秒）
+     * 默认设置为 300 秒（5分钟），因为生成闪卡（包含 HTML+CSS+SVG）可能需要较长时间
      */
-    private int timeout = 30000;
+    private int timeout = 300000;
+
 
     /**
      * 创建并配置 OkHttp 客户端

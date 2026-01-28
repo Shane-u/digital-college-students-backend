@@ -19,6 +19,7 @@ import com.digital.model.entity.User;
 import com.digital.model.vo.PostVO;
 import com.digital.service.PostService;
 import com.digital.service.UserService;
+import com.digital.utils.RedisCacheUtils;
 import java.util.List;
 
 
@@ -46,6 +47,9 @@ public class PostController {
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private RedisCacheUtils redisCacheUtils;
 
     // region 增删改查
 
@@ -75,6 +79,10 @@ public class PostController {
         boolean result = postService.save(post);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         long newPostId = post.getId();
+        
+        // 清除帖子列表缓存
+        redisCacheUtils.deleteByPattern(RedisCacheUtils.CacheKey.POST_LIST_PREFIX + "*");
+        
         return ResultUtils.success(newPostId);
     }
 
@@ -100,6 +108,11 @@ public class PostController {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
         }
         boolean b = postService.removeById(id);
+        
+        // 清除相关缓存
+        redisCacheUtils.deleteByPattern(RedisCacheUtils.CacheKey.POST_DETAIL_PREFIX + id + "*");
+        redisCacheUtils.deleteByPattern(RedisCacheUtils.CacheKey.POST_LIST_PREFIX + "*");
+        
         return ResultUtils.success(b);
     }
 
@@ -240,6 +253,11 @@ public class PostController {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
         }
         boolean result = postService.updateById(post);
+        
+        // 清除相关缓存
+        redisCacheUtils.deleteByPattern(RedisCacheUtils.CacheKey.POST_DETAIL_PREFIX + id + "*");
+        redisCacheUtils.deleteByPattern(RedisCacheUtils.CacheKey.POST_LIST_PREFIX + "*");
+        
         return ResultUtils.success(result);
     }
 

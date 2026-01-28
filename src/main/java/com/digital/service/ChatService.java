@@ -6,6 +6,7 @@ import com.digital.model.dto.chat.ChatSessionRequest;
 import com.digital.model.dto.chat.StreamChatResponse;
 import com.digital.model.vo.ChatMessageVO;
 import com.digital.model.vo.ChatSessionVO;
+import com.digital.model.vo.ChatSessionWithMessagesVO;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -66,5 +67,13 @@ public interface ChatService {
      * @param userId 用户ID
      */
     void deleteSession(String sessionId, Long userId);
+
+    /**
+     * 获取用户所有会话及其消息列表
+     *
+     * @param userId 用户ID
+     * @return 带消息列表的会话列表
+     */
+    List<ChatSessionWithMessagesVO> getAllSessionsWithMessages(Long userId);
 }
 

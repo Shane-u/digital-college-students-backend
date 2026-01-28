@@ -6,16 +6,21 @@ package com.digital.service;
 public interface EmailService {
     /**
      * 发送邮件
-     * @param to 收件人邮箱
-     * @param subject 邮件主题
-     * @param content 邮件内容
      */
     void sendEmail(String to, String subject, String content);
     
     /**
      * 发送验证码邮件（使用HTML模板）
-     * @param to 收件人邮箱
-     * @param verificationCode 验证码
      */
     void sendVerificationCodeEmail(String to, String verificationCode);
+    
+    /**
+     * 发送闪卡生成成功通知邮件
+     */
+    void sendFlashCardGeneratedEmail(String to, String flashCardTitle, String flashCardContent, String flashCardHtmlContent, String viewUrl);
+    
+    /**
+     * 发送闪卡生成失败通知邮件
+     */
+    void sendFlashCardFailedEmail(String to, String errorMessage);
 }

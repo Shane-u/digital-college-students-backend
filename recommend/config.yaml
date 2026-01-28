@@ -1,0 +1,51 @@
+# RecBole配置文件
+# 支持多种推荐模型：DSSM, BPR, DeepFM, NGCF, LightGCN等
+
+# 数据集配置
+field_separator: "\t"
+seq_separator: " "
+USER_ID_FIELD: user_id
+ITEM_ID_FIELD: item_id
+RATING_FIELD: rating
+TIME_FIELD: timestamp
+data_path: data/recbole  # 指定数据目录
+
+# 模型配置（DSSM双塔模型）
+model: DSSM
+embedding_size: 128
+mlp_hidden_size: [256, 128]
+dropout_prob: 0.3
+reg_weight: [1e-5, 1e-5]
+
+# 训练配置
+learning_rate: 0.001
+train_batch_size: 1024
+epochs: 20
+train_neg_sample_args:
+  distribution: uniform
+  alpha: 1.0
+  sample_num: 1
+  dynamic: false
+  candidate_num: 0
+
+# 评估配置
+eval_args:
+  split:
+    RS: [0.8, 0.1, 0.1]  # 训练集80%，验证集10%，测试集10%
+  group_by: user
+  order: TO
+  mode: full
+metrics: ['Recall', 'NDCG']
+topk: [5, 10, 20]
+valid_metric: Recall@10
+
+# 其他配置
+show_progress: true
+save_dataset: true
+save_dataloaders: true
+load_col:
+  inter: [user_id, item_id, rating, timestamp]
+  user: [user_id, major, grade, school] # 假设这些是你的用户特征
+  # item: [item_id, contest_name, class_first, class_second, level, organiser, job_name, job_content, company_name, salary, work_year] # 暂时注释掉，让RecBole自动推断
+device: cpu  # 或 'cuda:0' 如果有GPU
+use_gpu: false

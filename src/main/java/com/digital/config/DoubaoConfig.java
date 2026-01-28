@@ -32,7 +32,7 @@ public class DoubaoConfig {
     /**
      * 默认模型名称
      */
-    private String model = "doubao-seed-1-6-251015";
+    private String model = "doubao-1-5-lite-32k-250115";
 
     /**
      * 请求超时时间（毫秒）

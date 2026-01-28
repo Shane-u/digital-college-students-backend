@@ -9,8 +9,10 @@ import com.digital.model.dto.chat.Message;
 import com.digital.model.entity.User;
 import com.digital.model.vo.ChatMessageVO;
 import com.digital.model.vo.ChatSessionVO;
+import com.digital.model.vo.ChatSessionWithMessagesVO;
 import com.digital.service.ChatService;
 import com.digital.service.UserService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -52,6 +54,67 @@ public class ChatController {
     private UserService userService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /**
+     * 流式聊天接口
+     * 使用Server-Sent Events (SSE) 实现流式输出
+     *
+     * @param chatRequest 聊天请求对象
+     * @return SseEmitter 用于发送流式数据
+     */
+    @PostMapping("/completions/stream")
+    public SseEmitter streamChat(@RequestBody ChatRequest chatRequest) {
+        // 确保使用流式模式
+        chatRequest.setStream(true);
+
+        // 创建SseEmitter，设置超时时间为5分钟
+        SseEmitter emitter = new SseEmitter(300000L);
+
+        // 执行流式聊天
+        chatService.streamChat(chatRequest, streamResponse -> {
+            try {
+                // 构建SSE格式的数据
+                String data = "data: " + objectMapper.writeValueAsString(streamResponse) + "\n\n";
+
+                // 发送数据
+                emitter.send(SseEmitter.event()
+                        .data(data)
+                        .name("message"));
+
+                log.debug("发送流式数据块: {}", streamResponse.getDeltaContent());
+
+                // 如果流结束，关闭连接
+                if (streamResponse.isFinished()) {
+                    // 发送结束标记
+                    emitter.send(SseEmitter.event()
+                            .data("data: [DONE]\n\n")
+                            .name("done"));
+                    emitter.complete();
+                    log.debug("流式响应完成");
+                }
+            } catch (IOException e) {
+                log.error("发送流式数据失败", e);
+                emitter.completeWithError(e);
+            }
+        });
+
+        // 设置错误处理和超时处理
+        emitter.onError(throwable -> {
+            log.error("SseEmitter发生错误", throwable);
+            emitter.completeWithError(throwable);
+        });
+
+        emitter.onTimeout(() -> {
+            log.warn("SseEmitter超时");
+            emitter.complete();
+        });
+
+        emitter.onCompletion(() -> {
+            log.debug("SseEmitter完成");
+        });
+
+        return emitter;
+    }
 
     /**
      * 基于WebFlux的流式接口
@@ -162,12 +225,12 @@ public class ChatController {
         chatRequest.setUserId(resolvedUserId);
         chatRequest.setStream(true);
         
-        // 设置 thinking（禁用推理过程显示）
-        if (chatRequest.getThinking() == null) {
-            HashMap<String, String> thinking = new HashMap<>();
-            thinking.put("type", "disabled");
-            chatRequest.setThinking(thinking);
-        }
+        // 设置 thinking
+//        if (chatRequest.getThinking() == null) {
+//            HashMap<String, String> thinking = new HashMap<>();
+//            thinking.put("type", "enabled");
+//            chatRequest.setThinking(thinking);
+//        }
         
         // 确保消息列表不为空
         if (chatRequest.getMessages() == null || chatRequest.getMessages().isEmpty()) {
@@ -178,12 +241,31 @@ public class ChatController {
 
         // 将回调式API桥接为Flux
         return Flux.<ServerSentEvent<String>>create(sink -> {
-            // 将阻塞的下游调用放到弹性线程池，避免占用 Netty 事件循环导致"看起来阻塞"
+            // 弹性线程池
             Schedulers.boundedElastic().schedule(() -> {
                 chatService.streamChat(chatRequest, streamResponse -> {
                     if (sink.isCancelled()) {
                         return;
                     }
+
+                    // 1. 深度思考内容，推送 thinking 事件
+                    try {
+                        JsonNode root = objectMapper.valueToTree(streamResponse);
+                        JsonNode choices = root.get("choices");
+                        if (choices != null && choices.isArray() && choices.size() > 0) {
+                            JsonNode delta = choices.get(0).path("delta");
+                            if (delta != null && delta.has("reasoning_content")) {
+                                String reasoning = delta.get("reasoning_content").asText(null);
+                                if (StringUtils.isNotEmpty(reasoning)) {
+                                    String encodedThinking = reasoning.replace(" ", "&#32;").replace("\n", "&#92n");
+                                    sink.next(ServerSentEvent.builder(encodedThinking).event("thinking").build());
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {
+                    }
+
+                    // 2. 普通消息内容，推送 message 事件
                     String delta = streamResponse.getDeltaContent();
                     if (StringUtils.isNotEmpty(delta)) {
                         String encoded = delta.replace(" ", "&#32;").replace("\n", "&#92n");
@@ -219,6 +301,18 @@ public class ChatController {
     @GetMapping("/sessions")
     public BaseResponse<List<ChatSessionVO>> getSessions(@RequestParam Long userId) {
         List<ChatSessionVO> sessions = chatService.getSessions(userId);
+        return ResultUtils.success(sessions);
+    }
+
+    /**
+     * 获取用户所有会话及其消息列表
+     *
+     * @param userId 用户ID
+     * @return 带消息列表的会话列表
+     */
+    @GetMapping("/sessions-with-messages")
+    public BaseResponse<List<ChatSessionWithMessagesVO>> getSessionsWithMessages(@RequestParam Long userId) {
+        List<ChatSessionWithMessagesVO> sessions = chatService.getAllSessionsWithMessages(userId);
         return ResultUtils.success(sessions);
     }
 

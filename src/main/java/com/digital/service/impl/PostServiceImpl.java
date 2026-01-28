@@ -19,6 +19,7 @@ import com.digital.model.vo.PostVO;
 import com.digital.model.vo.UserVO;
 import com.digital.service.PostService;
 import com.digital.service.UserService;
+import com.digital.utils.RedisCacheUtils;
 import com.digital.utils.SqlUtils;
 import java.util.HashMap;
 import java.util.List;
@@ -33,7 +34,6 @@ import lombok.extern.slf4j.Slf4j;
 import cn.hutool.core.collection.CollUtil;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.data.elasticsearch.client.elc.ElasticsearchTemplate;
 import org.springframework.stereotype.Service;
 
 /**
@@ -53,6 +53,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
 
     @Resource
     private PostFavourMapper postFavourMapper;
+
+    @Resource
+    private RedisCacheUtils redisCacheUtils;
 
     @Override
     public void validPost(Post post, boolean add) {
@@ -117,8 +120,21 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
 
     @Override
     public PostVO getPostVO(Post post, HttpServletRequest request) {
-        PostVO postVO = PostVO.objToVo(post);
         long postId = post.getId();
+        User loginUser = userService.getLoginUserPermitNull(request);
+        
+        // 构建缓存key（包含用户ID，因为不同用户的点赞收藏状态不同）
+        String cacheKey = RedisCacheUtils.CacheKey.POST_DETAIL_PREFIX + postId + 
+                (loginUser != null ? ":" + loginUser.getId() : ":anonymous");
+        
+        // 尝试从缓存获取
+        PostVO cachedPostVO = redisCacheUtils.get(cacheKey);
+        if (cachedPostVO != null) {
+            log.debug("从缓存获取帖子详情，postId: {}", postId);
+            return cachedPostVO;
+        }
+        
+        PostVO postVO = PostVO.objToVo(post);
         // 1. 关联查询用户信息
         Long userId = post.getUserId();
         User user = null;
@@ -128,7 +144,6 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         UserVO userVO = userService.getUserVO(user);
         postVO.setUser(userVO);
         // 2. 已登录，获取用户点赞、收藏状态
-        User loginUser = userService.getLoginUserPermitNull(request);
         if (loginUser != null) {
             // 获取点赞
             QueryWrapper<PostThumb> postThumbQueryWrapper = new QueryWrapper<>();
@@ -143,6 +158,11 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
             PostFavour postFavour = postFavourMapper.selectOne(postFavourQueryWrapper);
             postVO.setHasFavour(postFavour != null);
         }
+        
+        // 缓存结果（匿名用户缓存时间稍短）
+        redisCacheUtils.set(cacheKey, postVO, 
+                loginUser != null ? RedisCacheUtils.ExpireTime.POST_DETAIL : RedisCacheUtils.ExpireTime.POST_DETAIL / 2);
+        
         return postVO;
     }
 
@@ -153,6 +173,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (CollUtil.isEmpty(postList)) {
             return postVOPage;
         }
+        
+        // 注意：列表查询由于查询条件复杂，缓存key难以构建，这里不缓存整个列表
+        // 但可以缓存单个PostVO，在getPostVO方法中已经实现
+        
         // 1. 关联查询用户信息
         Set<Long> userIdSet = postList.stream().map(Post::getUserId).collect(Collectors.toSet());
         Map<Long, List<User>> userIdUserListMap = userService.listByIds(userIdSet).stream()

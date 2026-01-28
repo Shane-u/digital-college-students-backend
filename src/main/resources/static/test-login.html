@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试登录页面</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .message {
+            margin-top: 20px;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .message.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .message.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #666;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 测试登录</h1>
+        <form id="loginForm">
+            <div class="form-group">
+                <label>账号（手机号/邮箱）</label>
+                <input type="text" id="account" placeholder="请输入手机号或邮箱" required>
+            </div>
+            <div class="form-group">
+                <label>密码</label>
+                <input type="password" id="password" placeholder="请输入密码" required>
+            </div>
+            <button type="submit">登录</button>
+        </form>
+        <div id="message"></div>
+        <div class="info">
+            <strong>使用说明：</strong><br>
+            1. 输入您的账号（userAccount字段）和密码<br>
+            2. 登录成功后会自动跳转到闪卡页面<br>
+            3. 或者您可以继续使用其他功能<br>
+            <br>
+            <strong>注意：</strong>此页面使用简化登录接口，无需验证码
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/user';
+
+        // 显示消息
+        function showMessage(text, isError = false) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = text;
+            messageDiv.className = `message ${isError ? 'error' : 'success'}`;
+            messageDiv.style.display = 'block';
+        }
+
+        // 登录表单提交
+        document.getElementById('loginForm').onsubmit = async (e) => {
+            e.preventDefault();
+            
+            const account = document.getElementById('account').value.trim();
+            const password = document.getElementById('password').value.trim();
+
+            if (!account || !password) {
+                showMessage('请填写账号和密码', true);
+                return;
+            }
+
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '登录中...';
+
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include', // 包含cookie，用于保持登录状态
+                    body: JSON.stringify({
+                        userAccount: account,
+                        userPassword: password
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    showMessage('登录成功！正在跳转...', false);
+                    // 延迟跳转，让用户看到成功消息
+                    setTimeout(() => {
+                        // 可以跳转到闪卡页面或其他页面
+                        window.location.href = '/flash-card.html';
+                    }, 1000);
+                } else {
+                    showMessage(`登录失败: ${result.message}`, true);
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '登录';
+                }
+            } catch (error) {
+                console.error('登录失败:', error);
+                showMessage(`登录失败: ${error.message}`, true);
+                submitBtn.disabled = false;
+                submitBtn.textContent = '登录';
+            }
+        };
+    </script>
+</body>
+</html>
+

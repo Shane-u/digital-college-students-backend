@@ -13,6 +13,7 @@ import com.digital.model.entity.ChatMessage;
 import com.digital.model.entity.ChatSession;
 import com.digital.model.vo.ChatMessageVO;
 import com.digital.model.vo.ChatSessionVO;
+import com.digital.model.vo.ChatSessionWithMessagesVO;
 import com.digital.repository.ChatMessageRepository;
 import com.digital.repository.ChatSessionRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -487,6 +488,40 @@ public class KimiChatService implements ChatService {
             msg.setIsDelete(true);
             chatMessageRepository.save(msg);
         }
+    }
+
+    /**
+     * 获取用户所有会话及其消息列表
+     */
+    @Override
+    public List<ChatSessionWithMessagesVO> getAllSessionsWithMessages(Long userId) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
+
+        // 查询用户未删除的所有会话，按更新时间倒序
+        List<ChatSession> sessions = chatSessionRepository
+                .findByUserIdAndIsDeleteOrderByUpdateTimeDesc(userId, false);
+
+        return sessions.stream().map(session -> {
+            ChatSessionWithMessagesVO vo = new ChatSessionWithMessagesVO();
+            vo.setId(session.getId());
+            vo.setUserId(session.getUserId());
+            vo.setTitle(session.getTitle());
+            vo.setCreateTime(session.getCreateTime());
+            vo.setUpdateTime(session.getUpdateTime());
+
+            // 查询该会话下该用户的所有未删除消息
+            List<ChatMessage> messages = chatMessageRepository
+                    .findBySessionIdAndUserIdAndIsDeleteOrderByCreateTimeAsc(session.getId(), userId, false);
+
+            List<ChatMessageVO> messageVOList = messages.stream().map(msg -> {
+                ChatMessageVO voMsg = new ChatMessageVO();
+                BeanUtils.copyProperties(msg, voMsg);
+                return voMsg;
+            }).collect(Collectors.toList());
+
+            vo.setMessages(messageVOList);
+            return vo;
+        }).collect(Collectors.toList());
     }
 }
 

@@ -3,6 +3,23 @@ spring:
     name: digital-college-students-backend
   profiles:
     active: dev
+  ai:
+    #  api-key: 3a2e7379-9038-4f38-9866-898bb460059f
+    #
+    #  base-url: https://ark.cn-beijing.volces.com/api/v3
+    #  model: doubao-1-5-lite-32k-250115
+    openai:
+      api-key: ${doubao.api-key}
+      base-url: ${doubao.base-url}
+      chat:
+        completions-path: /chat/completions
+        options:
+          model: ${doubao.model}
+    mcp:
+      client:
+        stdio:
+          enabled: true
+          servers-configuration: classpath:mcp/mcp-servers.json
 #  mvc:
 #    pathmatch:
 #      matching-strategy: ant_path_matcher
@@ -13,14 +30,14 @@ spring:
   # 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://47.109.65.166:3306/digital?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true
-    username: digital
-    password: digital0123 # 需要修改为自己的数据库密码，后续会部署服务器
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD} # 需要修改为自己的数据库密码，后续会部署服务器
   # 邮件配置
   mail:
-    host: smtp.163.com
-    username: zhaoshuang_1200@163.com
-    password: MHMcFLTpzC7dkJaq
+    host: ${MAIL_HOST}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
     default-encoding: UTF-8
     properties:
       mail:
@@ -29,13 +46,22 @@ spring:
           starttls:
             enable: true
             required: true
-  # Redis 配置
-#  redis:
-#    database: 1
-#    host: localhost
-#    port: 6379
-#    timeout: 5000
-#    password: 123456
+  data:
+    # Redis 配置
+    redis:
+      database: 0
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      timeout: 5000
+      password: ${REDIS_PASSWORD}
+      lettuce:
+        pool:
+          max-active: 8  # 最大连接数
+          max-idle: 8    # 最大空闲连接数
+          min-idle: 0   # 最小空闲连接数
+          max-wait: -1  # 最大等待时间（-1表示无限等待）
+    mongodb:
+      uri: ${MONGODB_URI}
   # 文件上传
   servlet:
     multipart:
@@ -43,9 +69,7 @@ spring:
       max-file-size: -1
       max-request-size: -1
   # MongoDB配置
-  data:
-    mongodb:
-      uri: mongodb://root:Zs123456@47.109.65.166:27017/digital_chat?authSource=admin
+
 server:
   address: 0.0.0.0
   port: 8121
@@ -69,10 +93,10 @@ wx:
   # 微信公众平台
   # todo 需替换配置
   mp:
-    token: xxx
-    aesKey: xxx
-    appId: xxx
-    secret: xxx
+    token: ${WX_MP_TOKEN}
+    aesKey: ${WX_MP_AES_KEY}
+    appId: ${WX_MP_APP_ID}
+    secret: ${WX_MP_SECRET}
     config-storage:
       http-client-type: HttpClient
       key-prefix: wx
@@ -83,16 +107,16 @@ wx:
   # 微信开放平台
   # todo 需替换配置
   open:
-    appId: xxx
-    appSecret: xxx
+    appId: ${WX_OPEN_APP_ID}
+    appSecret: ${WX_OPEN_APP_SECRET}
 # 对象存储
 # todo 需替换配置
 cos:
   client:
-    accessKey: xxx
-    secretKey: xxx
-    region: xxx
-    bucket: xxx
+    accessKey: ${COS_ACCESS_KEY}
+    secretKey: ${COS_SECRET_KEY}
+    region: ${COS_REGION}
+    bucket: ${COS_BUCKET}
 # 爬虫配置
 crawler:
   auto-start:
@@ -102,10 +126,10 @@ crawler:
     max-pages: 40  # 默认最大页数
 # 硅基流动 AI 配置
 silicon-flow:
-  api-key: yours-apikey  # API密钥，需要替换为实际的API Key
-  base-url: https://api.siliconflow.cn/v1  # API基础URL
-  model: Qwen/Qwen3-30B-A3B-Instruct-2507  # 默认模型
-  timeout: 30000  # 请求超时时间（毫秒）
+  api-key: ${SILICON_FLOW_API_KEY}  # API密钥，需要替换为实际的API Key
+  base-url: https://api.siliconflow.cn  # API基础URL
+  model: THUDM/glm-4-9b-chat # 默认模型
+  timeout: 300000  # 请求超时时间（毫秒），设置为5分钟，因为生成闪卡（包含HTML+CSS+SVG）可能需要较长时间
 # 接口文档配置
 knife4j:
   enable: true
@@ -119,10 +143,10 @@ knife4j:
           - com.digital
 # Minio核⼼配置
 minio:
-  endpoint: http://47.109.65.166:9002 # 服务地址
-  access-key: admin # 账号
-  secret-key: 12345678 # 密码
-  bucket-name: digital # 存储桶名
+  endpoint: ${MINIO_ENDPOINT} # 服务地址
+  access-key: ${MINIO_ACCESS_KEY} # 账号
+  secret-key: ${MINIO_SECRET_KEY} # 密码
+  bucket-name: ${MINIO_BUCKET} # 存储桶名
   # 清理规则配置
   clean:
     enabled: true # 是否开启清理任务
@@ -132,21 +156,66 @@ minio:
     max-batch-size: 100 # 批量删除数量（避免Minio压⼒过⼤）
 # 火山引擎Doubao配置
 doubao:
-  api-key: 95c87328-e0d0-4127-83f9-d1fc421bdcc7
-  base-url: https://ark.cn-beijing.volces.com/api/v3
-  model: doubao-seed-1-6-251015
+  api-key: ${DOUBAO_API_KEY}
+  base-url: ${DOUBAO_BASE_URL}
+  model: ${DOUBAO_MODEL}
   timeout: 60000 # 请求超时时间（毫秒）
+
+milvus:
+  host: ${MILVUS_HOST}
+  port: ${MILVUS_PORT}
+  username:
+  password:
+  database-name: default
 
 # 火山引擎DeepSeek配置
 deepseek:
-  api-key: 95c87328-e0d0-4127-83f9-d1fc421bdcc7  # 需要替换为实际的API密钥
-  base-url: https://ark.cn-beijing.volces.com/api/v3
-  model: deepseek-v3-1-terminus
+  api-key: ${DEEPSEEK_API_KEY}  # 需要替换为实际的API密钥
+  base-url: ${DEEPSEEK_BASE_URL}
+  model: ${DEEPSEEK_MODEL}
   timeout: 60000 # 请求超时时间（毫秒）
 
 # 火山引擎Kimi配置
 kimi:
-  api-key: 95c87328-e0d0-4127-83f9-d1fc421bdcc7  # 需要替换为实际的API密钥
-  base-url: https://ark.cn-beijing.volces.com/api/v3
-  model: kimi-k2-250905
+  api-key: ${KIMI_API_KEY}  # 需要替换为实际的API密钥
+  base-url: ${KIMI_BASE_URL}
+  model: ${KIMI_MODEL}
   timeout: 60000 # 请求超时时间（毫秒）
+
+# Dify 配置
+dify:
+  api-key: ${DIFY_API_KEY}
+  base-url: ${DIFY_BASE_URL}
+  workflow-id: ${DIFY_WORKFLOW_ID}
+  timeout: 60000 # 请求超时时间（毫秒）
+
+# 百炼配置
+bailian:
+  api-key: ${BAILIAN_API_KEY}
+  base-url: ${BAILIAN_BASE_URL}
+  application-id: ${BAILIAN_APP_ID}
+  timeout: 60000 # 请求超时时间（毫秒）
+
+management:
+  endpoints:
+    enabled-by-default: true
+    web:
+      base-path: /actuator
+      exposure:
+        # 生产环境建议按需收敛（至少保留 health, prometheus）
+        include: health,info,metrics,prometheus,caches,threaddump,heapdump,loggers
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  health:
+    elasticsearch:
+      enabled: false # 禁用 Elasticsearch 健康检查
+
+huggingface:
+  asr:
+    # Hugging Face Token
+    api-key: ${HF_ASR_API_KEY}
+    model: ${HF_ASR_MODEL}

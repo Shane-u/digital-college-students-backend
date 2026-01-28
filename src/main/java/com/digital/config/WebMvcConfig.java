@@ -15,8 +15,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     /**
      * 配置自定义异步线程池（替代默认的 SimpleAsyncTaskExecutor）
+     * 设置为 primary，并添加 taskExecutor 别名，供 @Async 使用
      */
-    @Bean(name = "asyncTaskExecutor")
+    @Bean(name = {"asyncTaskExecutor", "taskExecutor"})
+    @org.springframework.context.annotation.Primary
     public Executor asyncTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(10);

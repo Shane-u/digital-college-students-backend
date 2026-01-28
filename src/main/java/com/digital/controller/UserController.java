@@ -356,7 +356,7 @@ public class UserController {
 
     /**
      * 头像上传（MinIO）
-     * 将图片上传到 MinIO 并返回可访问 URL
+     * 仿照成长记录上传逻辑，将图片上传到 MinIO 并返回可访问 URL
      */
     @PostMapping("/upload/avatar")
     public BaseResponse<String> uploadAvatar(@RequestPart("file") MultipartFile file, HttpServletRequest request) {
@@ -371,6 +371,7 @@ public class UserController {
             String md5 = minioManager.calculateMerkleTreeMd5(new ByteArrayInputStream(fileBytes), 2 * 1024 * 1024);
             String objectName = "avatars/" + loginUser.getId() + "/" + md5 + "/" + file.getOriginalFilename();
             String url = minioManager.putObject(objectName, inputStream, file.getContentType(), file.getSize());
+            url = url.replace(":9002/", ":9003/");
             return ResultUtils.success(url);
         } catch (Exception e) {
             log.error("头像上传失败", e);

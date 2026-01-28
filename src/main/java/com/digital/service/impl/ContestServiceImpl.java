@@ -8,6 +8,7 @@ import com.digital.model.dto.contest.ContestQueryRequest;
 import com.digital.model.entity.Contest;
 import com.digital.model.vo.ContestVO;
 import com.digital.service.ContestService;
+import com.digital.utils.RedisCacheUtils;
 import com.digital.utils.SqlUtils;
 import com.digital.exception.ThrowUtils;
 import com.digital.common.ErrorCode;
@@ -20,6 +21,8 @@ import okhttp3.Response;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
+
+import jakarta.annotation.Resource;
 
 import java.io.IOException;
 import java.net.URLEncoder;
@@ -41,6 +44,9 @@ public class ContestServiceImpl extends ServiceImpl<ContestMapper, Contest> impl
     private static final String API_DETAIL_URL = "https://apiv4buffer.saikr.com/api/pc/contest/info";
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
+
+    @Resource
+    private RedisCacheUtils redisCacheUtils;
 
     public ContestServiceImpl() {
         this.httpClient = new OkHttpClient.Builder()
@@ -416,6 +422,22 @@ public class ContestServiceImpl extends ServiceImpl<ContestMapper, Contest> impl
         // 限制爬虫
         ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
         
+        // 构建缓存key（基于查询参数）
+        String cacheKey = RedisCacheUtils.CacheKey.CONTEST_LIST_PREFIX + 
+                "current:" + current + ":size:" + size + ":" +
+                (contestQueryRequest.getContestName() != null ? contestQueryRequest.getContestName() : "") + ":" +
+                (contestQueryRequest.getClassId() != null ? contestQueryRequest.getClassId() : "") + ":" +
+                (contestQueryRequest.getLevel() != null ? contestQueryRequest.getLevel() : "") + ":" +
+                (contestQueryRequest.getTimeStatus() != null ? contestQueryRequest.getTimeStatus() : "") + ":" +
+                (contestQueryRequest.getSortField() != null ? contestQueryRequest.getSortField() : "");
+        
+        // 尝试从缓存获取
+        Page<ContestVO> cachedPage = redisCacheUtils.get(cacheKey);
+        if (cachedPage != null) {
+            log.debug("从缓存获取竞赛列表，key: {}", cacheKey);
+            return cachedPage;
+        }
+        
         // 构建查询条件
         QueryWrapper<Contest> queryWrapper = this.getQueryWrapper(contestQueryRequest);
         log.debug("查询条件: {}", queryWrapper);
@@ -430,6 +452,9 @@ public class ContestServiceImpl extends ServiceImpl<ContestMapper, Contest> impl
                 .map(this::getContestVO)
                 .collect(java.util.stream.Collectors.toList());
         contestVOPage.setRecords(contestVOList);
+        
+        // 缓存结果
+        redisCacheUtils.set(cacheKey, contestVOPage, RedisCacheUtils.ExpireTime.CONTEST_LIST);
         
         return contestVOPage;
     }
@@ -447,6 +472,20 @@ public class ContestServiceImpl extends ServiceImpl<ContestMapper, Contest> impl
         // 限制爬虫
         ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
 
+        // 构建缓存key（基于查询参数）
+        String cacheKey = RedisCacheUtils.CacheKey.CONTEST_LIST_PREFIX + "honor:" +
+                "current:" + current + ":size:" + size + ":" +
+                (contestQueryRequest.getContestName() != null ? contestQueryRequest.getContestName() : "") + ":" +
+                (contestQueryRequest.getClassId() != null ? contestQueryRequest.getClassId() : "") + ":" +
+                (contestQueryRequest.getTimeStatus() != null ? contestQueryRequest.getTimeStatus() : "");
+
+        // 尝试从缓存获取
+        Page<ContestVO> cachedPage = redisCacheUtils.get(cacheKey);
+        if (cachedPage != null) {
+            log.debug("从缓存获取榜单竞赛列表，key: {}", cacheKey);
+            return cachedPage;
+        }
+
         // 构建查询条件
         QueryWrapper<Contest> queryWrapper = this.getHonorQueryWrapper(contestQueryRequest);
         log.debug("查询条件: {}", queryWrapper);
@@ -462,11 +501,24 @@ public class ContestServiceImpl extends ServiceImpl<ContestMapper, Contest> impl
                 .collect(java.util.stream.Collectors.toList());
         contestVOPage.setRecords(contestVOList);
 
+        // 缓存结果
+        redisCacheUtils.set(cacheKey, contestVOPage, RedisCacheUtils.ExpireTime.CONTEST_LIST);
+
         return contestVOPage;
     }
     @Override
     public Object getContestDetail(Long contestId) {
         try {
+            // 构建缓存key
+            String cacheKey = RedisCacheUtils.CacheKey.CONTEST_DETAIL_PREFIX + contestId;
+            
+            // 尝试从缓存获取
+            Object cachedDetail = redisCacheUtils.get(cacheKey);
+            if (cachedDetail != null) {
+                log.debug("从缓存获取竞赛详情，contestId: {}", contestId);
+                return cachedDetail;
+            }
+            
             // 从数据库查询竞赛信息
             Contest contest = this.getOne(new QueryWrapper<Contest>().eq("contestId", contestId));
             if (contest == null) {
@@ -526,7 +578,12 @@ public class ContestServiceImpl extends ServiceImpl<ContestMapper, Contest> impl
                 }
 
                 // 将JsonNode转换为Map，这样可以全量返回所有字段
-                return objectMapper.convertValue(dataNode, java.util.Map.class);
+                Object detail = objectMapper.convertValue(dataNode, java.util.Map.class);
+                
+                // 缓存结果（外部API调用，缓存时间较长）
+                redisCacheUtils.set(cacheKey, detail, RedisCacheUtils.ExpireTime.CONTEST_DETAIL);
+                
+                return detail;
             }
         } catch (IOException e) {
             log.error("获取竞赛详情时发生IO异常", e);

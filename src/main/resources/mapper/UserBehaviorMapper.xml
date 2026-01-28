@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.digital.mapper.UserBehaviorMapper">
+
+    <!-- 统计用户对物品的行为次数 -->
+    <select id="countUserBehaviorByItem" resultType="java.util.Map">
+        SELECT
+            behaviorType,
+            COUNT(*) as count,
+            SUM(behaviorValue) as totalValue
+        FROM user_behavior
+        WHERE userId = #{userId}
+          AND itemType = #{itemType}
+          AND itemId = #{itemId}
+          AND isDelete = 0
+        GROUP BY behaviorType
+    </select>
+
+    <!-- 获取用户的行为历史 -->
+    <select id="getUserBehaviorHistory" resultType="com.digital.model.entity.UserBehavior">
+        SELECT *
+        FROM user_behavior
+        WHERE userId = #{userId}
+          AND itemType = #{itemType}
+          AND isDelete = 0
+        ORDER BY createTime DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 获取相似用户（基于行为相似度） -->
+    <select id="getSimilarUsers" resultType="java.util.Map">
+        SELECT
+            ub2.userId,
+            COUNT(*) as commonItems,
+            SUM(ub1.behaviorValue * ub2.behaviorValue) as similarity
+        FROM user_behavior ub1
+        INNER JOIN user_behavior ub2 ON ub1.itemId = ub2.itemId
+            AND ub1.itemType = ub2.itemType
+            AND ub1.userId != ub2.userId
+        WHERE ub1.userId = #{userId}
+          AND ub1.itemType = #{itemType}
+          AND ub1.isDelete = 0
+          AND ub2.isDelete = 0
+        GROUP BY ub2.userId
+        HAVING commonItems >= 2
+        ORDER BY similarity DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

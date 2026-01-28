@@ -1,0 +1,37 @@
+package com.digital.model.dto.flashcard;
+
+import java.io.Serializable;
+import lombok.Data;
+
+/**
+ * 更新闪卡请求
+ *
+ * @author Shane
+ */
+@Data
+public class FlashCardUpdateRequest implements Serializable {
+
+    /**
+     * 闪卡id
+     */
+    private Long id;
+
+    /**
+     * 知识点标题
+     */
+    private String title;
+
+    /**
+     * 详细知识点内容（纯文本）
+     */
+    private String content;
+
+    /**
+     * 闪卡HTML内容（包含HTML+CSS+SVG动画）
+     */
+    private String htmlContent;
+
+    private static final long serialVersionUID = 1L;
+}
+
+
