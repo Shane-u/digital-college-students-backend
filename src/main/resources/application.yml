@@ -4,10 +4,6 @@ spring:
   profiles:
     active: dev
   ai:
-    #  api-key: 3a2e7379-9038-4f38-9866-898bb460059f
-    #
-    #  base-url: https://ark.cn-beijing.volces.com/api/v3
-    #  model: doubao-1-5-lite-32k-250115
     openai:
       api-key: ${doubao.api-key}
       base-url: ${doubao.base-url}
