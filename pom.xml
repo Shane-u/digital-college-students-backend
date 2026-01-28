@@ -333,6 +333,14 @@
             <artifactId>langchain4j-milvus</artifactId>
             <version>1.0.0-beta3</version>
         </dependency>
+
+        <!-- Dotenv to load .env file -->
+        <dependency>
+            <groupId>io.github.cdimascio</groupId>
+            <artifactId>dotenv-java</artifactId>
+            <version>3.0.0</version>
+        </dependency>
+
     </dependencies>
 
     <build>
