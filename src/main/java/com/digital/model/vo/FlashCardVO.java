@@ -15,7 +15,7 @@ public class FlashCardVO implements Serializable {
     /**
      * 闪卡id
      */
-    private Long id;
+    private String id;
 
     /**
      * 用户id

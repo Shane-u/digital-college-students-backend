@@ -79,7 +79,7 @@ public class FlashCardEventListener {
                 return;
             }
             
-            FlashCard flashCard = flashCardService.getById(event.getFlashCardId());
+            FlashCard flashCard = flashCardService.getFlashCardByIdString(event.getFlashCardId());
             if (flashCard == null) {
                 log.warn("发送闪卡生成成功邮件失败：闪卡不存在，flashCardId={}", event.getFlashCardId());
                 return;

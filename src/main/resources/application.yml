@@ -215,3 +215,7 @@ huggingface:
     # Hugging Face Token
     api-key: ${HF_ASR_API_KEY}
     model: ${HF_ASR_MODEL}
+
+flashcard:
+  temp:
+    expiration-days: 7 # 临时闪卡在Redis中的过期时间，单位：天

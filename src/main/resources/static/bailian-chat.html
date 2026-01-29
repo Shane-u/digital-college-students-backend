@@ -1151,13 +1151,13 @@
                     // 如果WebSocket未连接，使用轮询方式检查
                     if (!isWebSocketConnected()) {
                         console.log('WebSocket未连接，使用轮询方式检查闪卡状态');
-                        checkFlashCardGenerated(result.data);
+                        checkFlashCardProgress(result.data); // 传递String类型的flashCardId
                     } else {
                         console.log('WebSocket已连接，等待实时通知');
                         // 即使WebSocket连接，也启动一个备用轮询（防止WebSocket消息丢失）
                         window.flashCardCheckInterval = setTimeout(() => {
                             if (!window.flashCardGenerated) {
-                                checkFlashCardGenerated(result.data);
+                                checkFlashCardProgress(result.data); // 传递String类型的flashCardId
                             }
                         }, 10000); // 10秒后如果还没收到通知，开始轮询
                     }
@@ -1178,14 +1178,14 @@
             }
         }
 
-        async function checkFlashCardGenerated(flashCardId) {
+        async function checkFlashCardProgress(flashCardId) {
             // 如果已经收到通知，不再轮询
             if (window.flashCardGenerated) {
                 return;
             }
             
             let attempts = 0;
-            const maxAttempts = 60; // 增加到60次，每次2秒，总共2分钟
+            const maxAttempts = 120; // 增加到120次，每次2秒，总共4分钟，适应更长的AI生成时间
             
             const checkInterval = setInterval(async () => {
                 // 如果已经收到通知，停止轮询
@@ -1197,73 +1197,102 @@
                 attempts++;
                 
                 try {
-                    const response = await fetch(`${FLASH_CARD_API_BASE}/list`, {
+                    const progressResponse = await fetch(`${FLASH_CARD_API_BASE}/progress?flashCardId=${flashCardId}`, {
                         method: 'GET',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'include'
                     });
-
-                    const result = await response.json();
-                    if (result.code === 0 && result.data) {
-                        const card = result.data.find(c => c.id === flashCardId);
-                        if (card) {
-                            // 检查闪卡状态
-                            const statusResponse = await fetch(`${FLASH_CARD_API_BASE}/status?flashCardId=${flashCardId}`, {
-                                method: 'GET',
-                                headers: { 'Content-Type': 'application/json' },
-                                credentials: 'include'
-                            });
-                            
-                            const statusResult = await statusResponse.json();
-                            if (statusResult.code === 0) {
-                                const status = statusResult.data;
-                                
-                                if (status === 'success' && card.htmlContent && card.htmlContent.trim() !== '') {
-                                    window.flashCardGenerated = true;
-                                    clearInterval(checkInterval);
-                                    addSystemMessage('✅ 闪卡生成完成！点击"查看闪卡"按钮查看。');
-                                    if ('Notification' in window && Notification.permission === 'granted') {
-                                        new Notification('闪卡生成完成', {
-                                            body: `闪卡"${card.title}"已生成完成`,
-                                            icon: '/favicon.ico'
-                                        });
-                                    }
-                                    return;
-                                } else if (status === 'failed') {
-                                    window.flashCardGenerated = true;
-                                    clearInterval(checkInterval);
-                                    addSystemMessage('❌ 闪卡生成失败，请重试。', true);
-                                    return;
-                                }
+                    
+                    const progressResult = await progressResponse.json();
+                    
+                    if (progressResult.code === 0 && progressResult.data) {
+                        const progressData = progressResult.data;
+                        
+                        if (progressData.status === 'COMPLETED') {
+                            window.flashCardGenerated = true;
+                            clearInterval(checkInterval);
+                            addSystemMessage(`✅ 闪卡生成完成！闪卡ID: ${flashCardId}。您可以点击"确认保存"按钮。`);
+                            addConfirmFlashCardButton(flashCardId);
+                            if ('Notification' in window && Notification.permission === 'granted') {
+                                new Notification('闪卡生成完成', {
+                                    body: `闪卡已生成完成，点击确认保存`, // 这里应该显示闪卡标题，但目前无法获取
+                                    icon: '/favicon.ico'
+                                });
                             }
-                            
-                            // 如果没有状态接口，检查htmlContent
-                            if (card.htmlContent && card.htmlContent.trim() !== '' && 
-                                !card.htmlContent.includes('正在生成中')) {
-                                window.flashCardGenerated = true;
-                                clearInterval(checkInterval);
-                                addSystemMessage('✅ 闪卡生成完成！点击"查看闪卡"按钮查看。');
-                                if ('Notification' in window && Notification.permission === 'granted') {
-                                    new Notification('闪卡生成完成', {
-                                        body: `闪卡"${card.title}"已生成完成`,
-                                        icon: '/favicon.ico'
-                                    });
-                                }
-                                return;
-                            }
+                            return;
+                        } else if (progressData.status === 'FAILED') {
+                            window.flashCardGenerated = true;
+                            clearInterval(checkInterval);
+                            addSystemMessage(`❌ 闪卡生成失败: ${progressData.message || '未知错误'}。`, true);
+                            return;
+                        } else {
+                            // 正在生成中，更新进度信息
+                            const progressMessage = `闪卡生成中... 状态: ${progressData.status || '未知'}, 进度: ${progressData.progress || 0}%`;
+                            // 可以在这里更新一个专门的进度显示区域，或者仅在控制台打印
+                            console.log(progressMessage);
                         }
+                    } else if (progressResult.code === 10000 && progressResult.message === '指定闪卡ID的进度不存在或已过期') {
+                        // 进度信息已过期或不存在，可能是用户已经确认或删除了
+                        window.flashCardGenerated = true;
+                        clearInterval(checkInterval);
+                        addSystemMessage('闪卡进度信息已过期或不存在。');
+                    } else {
+                        console.error('获取闪卡进度失败:', progressResult.message);
                     }
                 } catch (error) {
-                    console.error('检查闪卡状态失败:', error);
+                    console.error('检查闪卡进度失败:', error);
                 }
                 
                 if (attempts >= maxAttempts) {
                     clearInterval(checkInterval);
-                    addSystemMessage('闪卡生成可能已完成，请点击"查看闪卡"按钮查看。');
+                    addSystemMessage('闪卡生成超时，请检查闪卡列表或重试。', true);
                 }
             }, 2000); // 改为每2秒检查一次，减少服务器压力
             
             window.flashCardCheckInterval = checkInterval;
+        }
+
+        function addConfirmFlashCardButton(flashCardId) {
+            const chatArea = document.getElementById('chatArea');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message system';
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.innerHTML = `
+                <p>闪卡已生成成功，是否要保存到终库？</p>
+                <button class="flash-card-btn" onclick="confirmSaveFlashCard('${flashCardId}', this)">确认保存</button>
+            `;
+            messageDiv.appendChild(contentDiv);
+            chatArea.appendChild(messageDiv);
+            scrollToBottom();
+        }
+
+        async function confirmSaveFlashCard(flashCardId, btn) {
+            if (btn) btn.disabled = true;
+            try {
+                const response = await fetch(`${FLASH_CARD_API_BASE}/confirm`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ id: flashCardId })
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    addSystemMessage('✅ 闪卡已成功保存到终库！', false);
+                    if (btn) btn.remove(); // 移除按钮
+                } else {
+                    addSystemMessage(`保存闪卡失败: ${result.message}`, true);
+                    if (btn) btn.disabled = false;
+                }
+            } catch (error) {
+                console.error('保存闪卡失败:', error);
+                addSystemMessage(`保存闪卡失败: ${error.message}`, true);
+                if (btn) btn.disabled = false;
+            }
         }
 
         if ('Notification' in window && Notification.permission === 'default') {

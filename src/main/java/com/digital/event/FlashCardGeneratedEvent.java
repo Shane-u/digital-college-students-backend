@@ -10,12 +10,12 @@ import org.springframework.context.ApplicationEvent;
 @Getter
 public class FlashCardGeneratedEvent extends ApplicationEvent {
     
-    private final Long flashCardId;
+    private final String flashCardId;
     private final Long userId;
     private final String status;
     private final String errorMessage;
     
-    public FlashCardGeneratedEvent(Object source, Long flashCardId, Long userId, String status) {
+    public FlashCardGeneratedEvent(Object source, String flashCardId, Long userId, String status) {
         super(source);
         this.flashCardId = flashCardId;
         this.userId = userId;
@@ -23,7 +23,7 @@ public class FlashCardGeneratedEvent extends ApplicationEvent {
         this.errorMessage = null;
     }
     
-    public FlashCardGeneratedEvent(Object source, Long flashCardId, Long userId, String status, String errorMessage) {
+    public FlashCardGeneratedEvent(Object source, String flashCardId, Long userId, String status, String errorMessage) {
         super(source);
         this.flashCardId = flashCardId;
         this.userId = userId;

@@ -24,7 +24,7 @@ public class WebSocketNotificationService {
     /**
      * 发送闪卡生成成功通知
      */
-    public void sendFlashCardGeneratedNotification(Long userId, Long flashCardId) {
+    public void sendFlashCardGeneratedNotification(Long userId, String flashCardId) {
         try {
             Map<String, Object> message = new HashMap<>();
             message.put("type", "flashcard_generated");
@@ -42,7 +42,7 @@ public class WebSocketNotificationService {
     /**
      * 发送闪卡生成失败通知
      */
-    public void sendFlashCardFailedNotification(Long userId, Long flashCardId, String errorMessage) {
+    public void sendFlashCardFailedNotification(Long userId, String flashCardId, String errorMessage) {
         try {
             Map<String, Object> message = new HashMap<>();
             message.put("type", "flashcard_failed");

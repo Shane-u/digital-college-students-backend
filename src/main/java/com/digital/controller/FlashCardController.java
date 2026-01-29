@@ -11,8 +11,11 @@ import com.digital.model.dto.flashcard.FlashCardReviewRequest;
 import com.digital.model.dto.flashcard.FlashCardUpdateRequest;
 import com.digital.model.entity.User;
 import com.digital.model.vo.FlashCardVO;
+import com.digital.model.vo.FlashCardProgressVO; // 新增导入
+import com.digital.manager.FlashCardProgressManager; // 新增导入
 import com.digital.service.FlashCardService;
 import com.digital.service.UserService;
+import org.springframework.data.redis.core.RedisTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,12 +42,15 @@ public class FlashCardController {
     @Resource
     private UserService userService;
 
+    @Resource
+    private FlashCardProgressManager flashCardProgressManager; // 新增
+
     /**
      * 生成闪卡（异步）
      * 立即返回，后台异步生成内容
      */
     @PostMapping("/generate")
-    public BaseResponse<Long> generateFlashCard(@RequestBody FlashCardGenerateRequest request,
+    public BaseResponse<String> generateFlashCard(@RequestBody FlashCardGenerateRequest request,
                                                  HttpServletRequest httpServletRequest) {
         if (request == null || StringUtils.isBlank(request.getOriginalContent())) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -133,7 +139,7 @@ public class FlashCardController {
      * 返回状态：generating-生成中, success-成功, failed-失败, not_found-不存在
      */
     @GetMapping("/status")
-    public BaseResponse<String> getFlashCardStatus(@org.springframework.web.bind.annotation.RequestParam Long flashCardId,
+    public BaseResponse<String> getFlashCardStatus(@org.springframework.web.bind.annotation.RequestParam String flashCardId,
                                                      HttpServletRequest httpServletRequest) {
         if (flashCardId == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
@@ -142,5 +148,99 @@ public class FlashCardController {
         userService.getLoginUser(httpServletRequest);
         return ResultUtils.success(flashCardService.getFlashCardStatus(flashCardId));
     }
-}
 
+    /**
+     * 查询闪卡生成进度
+     * @param flashCardId 闪卡ID
+     * @param httpServletRequest HttpServletRequest
+     * @return 闪卡生成进度信息
+     */
+    @GetMapping("/progress")
+    public BaseResponse<FlashCardProgressVO> getFlashCardProgress(@org.springframework.web.bind.annotation.RequestParam String flashCardId,
+                                                                HttpServletRequest httpServletRequest) {
+        if (flashCardId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+        }
+        User loginUser = userService.getLoginUser(httpServletRequest); // 确保用户已登录
+        FlashCardProgressVO progressVO = flashCardProgressManager.getProgress(flashCardId);
+        // 验证用户权限，确保只能查询自己的闪卡进度
+        if (!"NOT_FOUND".equals(progressVO.getStatus()) && !loginUser.getId().equals(progressVO.getUserId())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "无权限查询该闪卡进度");
+        }
+        return ResultUtils.success(progressVO);
+    }
+
+    /**
+     * 获取用户的暂存闪卡列表
+     */
+    @GetMapping("/temp-list")
+    public BaseResponse<List<FlashCardVO>> getTempUserFlashCards(HttpServletRequest httpServletRequest) {
+        User loginUser = userService.getLoginUser(httpServletRequest);
+        return ResultUtils.success(flashCardService.getTempUserFlashCards(loginUser.getId()));
+    }
+
+    /**
+     * 确认保存闪卡到终库
+     * @param request 包含临时闪卡ID的请求体
+     * @param httpServletRequest HttpServletRequest
+     * @return 确认结果
+     */
+    @PostMapping("/confirm")
+    public BaseResponse<Boolean> confirmFlashCard(@RequestBody com.digital.common.DeleteRequest request,
+                                                  HttpServletRequest httpServletRequest) {
+        if (request == null || StringUtils.isBlank(request.getId())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+        }
+        User loginUser = userService.getLoginUser(httpServletRequest);
+        return ResultUtils.success(flashCardService.confirmFlashCard(loginUser.getId(), request.getId()));
+    }
+
+    /**
+     * 删除临时闪卡及其进度
+     * @param request 包含临时闪卡ID的请求体
+     * @param httpServletRequest HttpServletRequest
+     * @return 删除结果
+     */
+    @PostMapping("/temp/delete")
+    public BaseResponse<Boolean> deleteTempFlashCard(@RequestBody DeleteRequest request,
+                                                               HttpServletRequest httpServletRequest) {
+        if (request == null || StringUtils.isBlank(request.getId())) {
+             throw new BusinessException(ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+        }
+        User loginUser = userService.getLoginUser(httpServletRequest);
+        return ResultUtils.success(flashCardService.deleteTempFlashCard(loginUser.getId(), request.getId()));
+    }
+
+    /**
+     * 查看临时闪卡详情（用于预览）
+     * @param tempFlashCardId 临时闪卡ID
+     * @param httpServletRequest
+     * @return
+     */
+    @GetMapping("/temp")
+    public BaseResponse<FlashCardVO> getTempFlashCard(@org.springframework.web.bind.annotation.RequestParam("id") String tempFlashCardId,
+                                                      HttpServletRequest httpServletRequest) {
+        if (StringUtils.isBlank(tempFlashCardId)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+        }
+        User loginUser = userService.getLoginUser(httpServletRequest);
+        // 复用 getFlashCardByIdString 逻辑，不过需要封装成 VO
+        com.digital.model.entity.FlashCard flashCard = flashCardService.getFlashCardByIdString(tempFlashCardId);
+
+        if (flashCard == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "临时闪卡不存在或已过期");
+        }
+
+        if (!flashCard.getUserId().equals(loginUser.getId())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "无权限查看该闪卡");
+        }
+
+        return ResultUtils.success(flashCardService.getFlashCardVO(flashCard));
+    }
+
+    @GetMapping("/temp/{id}")
+    public BaseResponse<FlashCardVO> getTempFlashCardPathVariable(@org.springframework.web.bind.annotation.PathVariable("id") String tempFlashCardId,
+                                                      HttpServletRequest httpServletRequest) {
+        return getTempFlashCard(tempFlashCardId, httpServletRequest);
+    }
+}

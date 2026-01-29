@@ -6,6 +6,7 @@ import com.digital.common.ErrorCode;
 import com.digital.exception.BusinessException;
 import com.digital.exception.ThrowUtils;
 import com.digital.manager.SiliconFlowManager;
+import com.digital.manager.FlashCardProgressManager;
 import com.digital.mapper.FlashCardMapper;
 import com.digital.model.dto.chat.ChatRequest;
 import com.digital.model.dto.chat.ChatResponse;
@@ -26,6 +27,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -48,14 +51,23 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
     @Resource
     private SiliconFlowManager siliconFlowManager;
 
-    @Resource
-    private UserService userService;
+    // @Resource
+    // private UserService userService; // Remove unused field
 
     @Resource
     private ApplicationContext applicationContext;
 
     @Resource
+    private RedisTemplate<String, Object> redisTemplate;
+
+    @Value("${flashcard.temp.expiration-days:7}") // 默认7天
+    private long tempFlashCardExpirationDays;
+
+    @Resource
     private ApplicationEventPublisher eventPublisher;
+
+    @Resource
+    private FlashCardProgressManager flashCardProgressManager;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -123,6 +135,7 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
             """;
 
     // AI辅助修改的提示词模板
+
     private static final String AI_ASSIST_PROMPT_TEMPLATE = """
             你是一位专业的记忆闪卡设计师。请根据用户要求修改以下闪卡。
             
@@ -177,12 +190,18 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
             5. 如果用户要求只修改部分内容，其他部分保持不变
             """;
 
+
+
     @Override
-    public Long generateFlashCard(Long userId, FlashCardGenerateRequest request) {
+    public String generateFlashCard(Long userId, FlashCardGenerateRequest request) {
         ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
         ThrowUtils.throwIf(StringUtils.isBlank(request.getOriginalContent()), ErrorCode.PARAMS_ERROR, "原始内容不能为空");
 
+        // 生成一个唯一的临时闪卡ID
+        String tempFlashCardId = "temp_flashcard:" + java.util.UUID.randomUUID();
+        
         FlashCard flashCard = new FlashCard();
+        flashCard.setId(tempFlashCardId); // 设置ID为临时闪卡ID
         flashCard.setUserId(userId);
         flashCard.setTitle("生成中...");
         flashCard.setContent("闪卡正在生成中，请稍候...");
@@ -195,23 +214,33 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         calendar.add(Calendar.MINUTE, 1);
         flashCard.setNextReviewTime(calendar.getTime());
 
-        boolean saved = this.save(flashCard);
-        ThrowUtils.throwIf(!saved, ErrorCode.SYSTEM_ERROR, "创建闪卡记录失败");
+        // 将初始闪卡信息保存到 Redis 暂存库
+        redisTemplate.opsForValue().set(tempFlashCardId, flashCard, tempFlashCardExpirationDays, java.util.concurrent.TimeUnit.DAYS);
         
-        Long flashCardId = flashCard.getId();
+        // 记录到用户的临时闪卡 Set 中
+        String userTempSetKey = "user_temp_flashcards:" + userId;
+        redisTemplate.opsForSet().add(userTempSetKey, tempFlashCardId);
+        redisTemplate.expire(userTempSetKey, tempFlashCardExpirationDays, java.util.concurrent.TimeUnit.DAYS); // 设置过期时间
+
+        // 初始化进度跟踪，使用临时闪卡ID
+        flashCardProgressManager.initProgress(tempFlashCardId, userId);
 
         try {
             FlashCardService proxy = applicationContext.getBean(FlashCardService.class);
-            proxy.generateFlashCardAsync(flashCardId, userId, request);
+            proxy.generateFlashCardAsync(tempFlashCardId, userId, request);
         } catch (Exception e) {
-            log.error("启动异步生成任务失败：flashCardId={}, error={}", flashCardId, e.getMessage(), e);
+            log.error("启动异步生成任务失败：flashCardId={}, error={}", tempFlashCardId, e.getMessage(), e);
+            // 更新进度为失败
+            flashCardProgressManager.updateProgress(tempFlashCardId, "FAILED", 0, "启动异步生成任务失败：" + e.getMessage());
+            // 更新 Redis 中的临时闪卡为失败状态
+            flashCard.setId(tempFlashCardId); // 确保ID字段被设置
             flashCard.setTitle("生成失败");
             flashCard.setContent("启动异步生成任务失败：" + e.getMessage());
             flashCard.setHtmlContent("<div style='padding: 20px; text-align: center; color: red;'><p>启动异步生成任务失败，请重试</p></div>");
-            this.updateById(flashCard);
+            redisTemplate.opsForValue().set(tempFlashCardId, flashCard, 7, java.util.concurrent.TimeUnit.DAYS); // 重新设置过期时间
         }
 
-        return flashCardId;
+        return tempFlashCardId;
     }
 
     /**
@@ -219,8 +248,9 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
      */
     @Override
     @Async
-    public void generateFlashCardAsync(Long flashCardId, Long userId, FlashCardGenerateRequest request) {
+    public void generateFlashCardAsync(String flashCardId, Long userId, FlashCardGenerateRequest request) {
         try {
+            flashCardProgressManager.updateProgress(flashCardId, "AI_CALL_IN_PROGRESS", 20, "正在调用AI生成闪卡内容...");
             String prompt = String.format(GENERATE_PROMPT_TEMPLATE, request.getOriginalContent());
             ChatRequest chatRequest = new ChatRequest();
             chatRequest.setModel(null);
@@ -232,6 +262,7 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, "AI返回内容为空");
             }
 
+            flashCardProgressManager.updateProgress(flashCardId, "PARSING_RESPONSE", 60, "AI内容返回，正在解析...");
             String responseContent = cleanJsonContent(response.getContent());
             JsonNode jsonNode = objectMapper.readTree(responseContent);
             
@@ -246,60 +277,86 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, "AI返回的内容为空");
             }
 
-            FlashCard flashCard = this.getById(flashCardId);
+            // 从 Redis 获取临时闪卡
+            FlashCard flashCard = (FlashCard) redisTemplate.opsForValue().get(flashCardId);
             if (flashCard == null) {
-                log.error("闪卡生成失败：记录不存在，flashCardId={}", flashCardId);
+                log.error("闪卡生成失败：Redis中不存在记录，flashCardId={}", flashCardId);
+                // 任务完成，但闪卡记录不存在，移除进度
+                flashCardProgressManager.removeProgress(flashCardId);
                 return;
             }
             
-            if (!"生成中...".equals(flashCard.getTitle())) {
-                log.warn("闪卡状态已改变，跳过更新，flashCardId={}, title={}", flashCardId, flashCard.getTitle());
-                return;
-            }
-
+            // 更新临时闪卡内容
             flashCard.setTitle(title);
             flashCard.setContent(content);
             flashCard.setHtmlContent(htmlContent);
-
-            boolean updated = this.updateById(flashCard);
-            if (updated) {
-                log.info("闪卡生成成功：flashCardId={}, userId={}, title={}", flashCardId, userId, title);
-                eventPublisher.publishEvent(new FlashCardGeneratedEvent(this, flashCardId, userId, "success"));
-            } else {
-                log.error("闪卡生成失败：数据库更新失败，flashCardId={}", flashCardId);
-                eventPublisher.publishEvent(new FlashCardGeneratedEvent(this, flashCardId, userId, "failed", "数据库更新失败"));
-                this.removeById(flashCardId);
-            }
+            // 更新 Redis 中的临时闪卡
+            redisTemplate.opsForValue().set(flashCardId, flashCard, tempFlashCardExpirationDays, java.util.concurrent.TimeUnit.DAYS); // 重新设置过期时间
+            
+            flashCardProgressManager.updateProgress(flashCardId, "COMPLETED", 100, "闪卡内容生成成功并暂存");
+            eventPublisher.publishEvent(new FlashCardGeneratedEvent(this, flashCardId, userId, "success")); // 发布事件，通知闪卡已生成
             
         } catch (Exception e) {
             log.error("闪卡生成失败：flashCardId={}, userId={}, error={}", flashCardId, userId, e.getMessage(), e);
-            
-            try {
-                FlashCard flashCard = this.getById(flashCardId);
-                if (flashCard != null && "生成中...".equals(flashCard.getTitle())) {
-                    this.removeById(flashCardId);
-                }
-            } catch (Exception deleteException) {
-                log.error("删除失败闪卡记录异常：flashCardId={}", flashCardId, deleteException);
+            String errorMessage = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            flashCardProgressManager.updateProgress(flashCardId, "FAILED", 0, "闪卡生成失败：" + errorMessage);
+
+            // 更新 Redis 中的临时闪卡为失败状态
+            FlashCard flashCard = (FlashCard) redisTemplate.opsForValue().get(flashCardId);
+            if (flashCard != null) {
+                flashCard.setId(flashCardId); // 确保ID字段被设置
+                flashCard.setTitle("生成失败");
+                flashCard.setContent("AI生成失败：" + errorMessage);
+                flashCard.setHtmlContent("<div style='padding: 20px; text-align: center; color: red;'><p>AI生成失败，请重试</p></div>");
+                redisTemplate.opsForValue().set(flashCardId, flashCard, tempFlashCardExpirationDays, java.util.concurrent.TimeUnit.DAYS); // 重新设置过期时间
             }
             
-            String errorMessage = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             eventPublisher.publishEvent(new FlashCardGeneratedEvent(this, flashCardId, userId, "failed", errorMessage));
         }
     }
 
     @Override
     public List<FlashCardVO> getUserFlashCards(Long userId) {
-        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
-
         QueryWrapper<FlashCard> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("userId", userId);
-        queryWrapper.ne("title", "生成中...");
-        queryWrapper.ne("title", "生成失败");
         queryWrapper.orderByDesc("createTime");
+        List<FlashCard> flashCards = this.list(queryWrapper);
+        return flashCards.stream().map(this::getFlashCardVO).collect(Collectors.toList());
+    }
 
-        return this.list(queryWrapper).stream()
+    @Override
+    public List<FlashCardVO> getTempUserFlashCards(Long userId) {
+        // 使用 scan 查找所有 temporary flashcards key
+        // 注意：这种 scan 方式在生产环境中可能效率较低，且只能匹配特定的前缀，
+        // 如果 Redis key 数量巨大，建议使用 set 维护用户拥有的 temp flashcard list
+        // 此处为了简单实现，假设用户最近的临时闪卡都存在 user_temp_flashcards:{userId} 这个 List 中
+        // 或者我们遍历 redis 中的 temp_flashcard:* keys (不推荐)
+
+        // 更好的方案：当生成闪卡时，将 key 添加到一个以 userId 为 key 的 Set 中：user_temp_flashcards:{userId}
+        // 获取时，先获取 set 中的所有 key，然后批量 get
+
+        String userTempSetKey = "user_temp_flashcards:" + userId;
+        java.util.Set<Object> keys = redisTemplate.opsForSet().members(userTempSetKey);
+
+        if (keys == null || keys.isEmpty()) {
+            return List.of();
+        }
+
+        List<Object> objects = redisTemplate.opsForValue().multiGet(keys.stream().map(Object::toString).collect(Collectors.toList()));
+
+        if (objects == null) {
+            return List.of();
+        }
+
+        return objects.stream()
+                .filter(obj -> obj instanceof FlashCard)
+                .map(obj -> (FlashCard) obj)
                 .map(this::getFlashCardVO)
+                .sorted((a, b) -> {
+                     // 简单按 title 排序或者其它逻辑，因为 UserFlashCardVO 可能没有 createTime
+                     // 如果 FlashCard 有 createTime 最好
+                     return 0;
+                })
                 .collect(Collectors.toList());
     }
 
@@ -342,15 +399,35 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
     }
 
     @Override
-    public boolean deleteFlashCard(Long userId, Long flashCardId) {
-        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
-        ThrowUtils.throwIf(flashCardId == null, ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
-
+    public boolean deleteFlashCard(Long userId, String flashCardId) {
         FlashCard flashCard = this.getById(flashCardId);
-        ThrowUtils.throwIf(flashCard == null, ErrorCode.NOT_FOUND_ERROR, "闪卡不存在");
-        ThrowUtils.throwIf(!flashCard.getUserId().equals(userId), ErrorCode.FORBIDDEN_ERROR, "无权限删除");
-
+        if (flashCard == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
+        }
+        if (!flashCard.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+        }
         return this.removeById(flashCardId);
+    }
+
+    @Override
+    public boolean deleteTempFlashCard(Long userId, String tempFlashCardId) {
+         // 验证所有权
+         FlashCard flashCard = (FlashCard) redisTemplate.opsForValue().get(tempFlashCardId);
+         if (flashCard != null && !flashCard.getUserId().equals(userId)) {
+             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+         }
+
+         // 不需要检查是否存在，如果不存在就是成功删除
+         redisTemplate.delete(tempFlashCardId);
+         // 从用户的临时闪卡集合中移除
+         String userTempSetKey = "user_temp_flashcards:" + userId;
+         redisTemplate.opsForSet().remove(userTempSetKey, tempFlashCardId);
+
+         // 移除进度信息
+         flashCardProgressManager.removeProgress(tempFlashCardId);
+
+         return true;
     }
 
     @Override
@@ -423,12 +500,12 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
     }
 
     @Override
-    public String getFlashCardStatus(Long flashCardId) {
+    public String getFlashCardStatus(String flashCardId) {
         if (flashCardId == null) {
             return "not_found";
         }
         
-        FlashCard flashCard = this.getById(flashCardId);
+        FlashCard flashCard = (FlashCard) redisTemplate.opsForValue().get(flashCardId); // 从Redis获取
         if (flashCard == null) {
             return "not_found";
         }
@@ -438,7 +515,7 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
             return "generating";
         } else if ("生成失败".equals(title)) {
             return "failed";
-        } else if (title != null && !title.isEmpty() && !"生成中...".equals(title) && !"生成失败".equals(title)) {
+        } else if (title != null && !title.isEmpty()) {
             return "success";
         } else {
             return "generating"; // 默认返回生成中
@@ -553,6 +630,7 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
      * 难度等级：1-重来（30秒），2-困难（6分钟），3-良好（10分钟），4-简单（4天）
      */
     private Date calculateNextReviewTime(int difficultyLevel, int reviewCount) {
+        // reviewCount currently unused but kept for future advanced algorithms (SM-2 etc)
         Calendar calendar = Calendar.getInstance();
         
         switch (difficultyLevel) {
@@ -573,6 +651,82 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         }
 
         return calendar.getTime();
+    }
+
+    @Override
+    public boolean confirmFlashCard(Long userId, String flashCardId) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(flashCardId), ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+
+        // 从 Redis 获取临时闪卡
+        FlashCard tempFlashCard = (FlashCard) redisTemplate.opsForValue().get(flashCardId);
+        ThrowUtils.throwIf(tempFlashCard == null, ErrorCode.NOT_FOUND_ERROR, "临时闪卡不存在或已过期");
+        ThrowUtils.throwIf(!tempFlashCard.getUserId().equals(userId), ErrorCode.FORBIDDEN_ERROR, "无权限确认该闪卡");
+
+        // 检查闪卡是否已生成成功
+        ThrowUtils.throwIf("生成中...".equals(tempFlashCard.getTitle()), ErrorCode.OPERATION_ERROR, "闪卡仍在生成中，请稍后再试");
+        ThrowUtils.throwIf("生成失败".equals(tempFlashCard.getTitle()), ErrorCode.OPERATION_ERROR, "闪卡生成失败，无法保存");
+
+        // 保存到数据库
+        // 注意：FlashCard 实体的主键策略是 ASSIGN_ID，所以这里如果 id 是 temp_ 开头的，应该置空让 MP 重新生成，
+        // 或者如果想保留某些关联，需要手动处理。通常存入 DB 时生成正式 ID。
+        // 为了避免 ID 冲突和格式问题，我们创建一个新对象
+        FlashCard newFlashCard = new FlashCard();
+        BeanUtils.copyProperties(tempFlashCard, newFlashCard); // Fix variable name from flashCard to tempFlashCard
+        newFlashCard.setId(null); // 让 MyBatis Plus 生成新的 ID
+        newFlashCard.setCreateTime(new Date());
+        newFlashCard.setUpdateTime(new Date());
+
+        boolean saved = this.save(newFlashCard);
+        if (!saved) {
+             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "保存到数据库失败");
+        }
+
+        // 删除 Redis 中的临时数据
+        redisTemplate.delete(flashCardId);
+        // 从用户的临时闪卡集合中移除
+        String userTempSetKey = "user_temp_flashcards:" + userId;
+        redisTemplate.opsForSet().remove(userTempSetKey, flashCardId);
+
+        flashCardProgressManager.removeProgress(flashCardId);
+
+        return true;
+    }
+
+    @Override
+    public void removeTempFlashCard(String flashCardId) {
+        FlashCard flashCard = (FlashCard) redisTemplate.opsForValue().get(flashCardId);
+        if (flashCard != null) {
+             Long userId = flashCard.getUserId();
+              String userTempSetKey = "user_temp_flashcards:" + userId;
+             redisTemplate.opsForSet().remove(userTempSetKey, flashCardId);
+        }
+        redisTemplate.delete(flashCardId);
+        flashCardProgressManager.removeProgress(flashCardId);
+    }
+
+    @Override
+    public FlashCard getFlashCardByIdString(String flashCardId) {
+        if (StringUtils.isBlank(flashCardId)) {
+            return null;
+        }
+
+        // 优先从 Redis 获取临时闪卡
+        if (flashCardId.startsWith("temp_flashcard:")) {
+            FlashCard tempFlashCard = (FlashCard) redisTemplate.opsForValue().get(flashCardId);
+            if (tempFlashCard != null) {
+                return tempFlashCard;
+            }
+        }
+
+        // 如果 Redis 中没有，或者不是临时闪卡，则尝试从数据库获取
+        try {
+            Long flashCardLongId = Long.parseLong(flashCardId);
+            return this.getById(flashCardLongId);
+        } catch (NumberFormatException e) {
+            // 如果不是有效的Long类型ID，则说明不是数据库中的闪卡，也不是Redis中的临时闪卡
+            return null;
+        }
     }
 }
 

@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -183,6 +184,7 @@ public class BaiLianService {
 
         // 累积助手回复内容
         StringBuilder assistantContent = new StringBuilder();
+        AtomicBoolean isAssistantMessageSaved = new AtomicBoolean(false);
 
         streamChat(chatRequest)
                 .subscribe(
@@ -198,7 +200,7 @@ public class BaiLianService {
                             // 如果流结束，保存助手消息
                             if (Boolean.TRUE.equals(response.getIsEnd()) && userId != null && StringUtils.isNotBlank(chatId)) {
                                 String content = assistantContent.toString();
-                                if (StringUtils.isNotBlank(content)) {
+                                if (StringUtils.isNotBlank(content) && isAssistantMessageSaved.compareAndSet(false, true)) {
                                     saveAssistantMessage(chatId, userId, content);
                                 }
                             }
@@ -208,7 +210,7 @@ public class BaiLianService {
                             // 即使出错，也尝试保存已累积的内容
                             if (userId != null && StringUtils.isNotBlank(chatId)) {
                                 String content = assistantContent.toString();
-                                if (StringUtils.isNotBlank(content)) {
+                                if (StringUtils.isNotBlank(content) && isAssistantMessageSaved.compareAndSet(false, true)) {
                                     saveAssistantMessage(chatId, userId, content);
                                 }
                             }
@@ -218,7 +220,7 @@ public class BaiLianService {
                             // 确保保存助手消息（如果还没有保存）
                             if (userId != null && StringUtils.isNotBlank(chatId)) {
                                 String content = assistantContent.toString();
-                                if (StringUtils.isNotBlank(content)) {
+                                if (StringUtils.isNotBlank(content) && isAssistantMessageSaved.compareAndSet(false, true)) {
                                     saveAssistantMessage(chatId, userId, content);
                                 }
                             }

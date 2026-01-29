@@ -22,7 +22,7 @@ public class FlashCard implements Serializable {
      * 闪卡id
      */
     @TableId(type = IdType.ASSIGN_ID)
-    private Long id;
+    private String id;
 
     /**
      * 用户id

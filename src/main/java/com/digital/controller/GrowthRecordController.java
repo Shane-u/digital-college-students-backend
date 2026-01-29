@@ -320,11 +320,11 @@ public class GrowthRecordController {
     @PostMapping("/delete")
     public BaseResponse<Boolean> deleteGrowthRecord(@RequestBody DeleteRequest deleteRequest,
             HttpServletRequest request) {
-        if (deleteRequest == null || deleteRequest.getId() <= 0) {
+        if (deleteRequest == null || deleteRequest.getId().isEmpty()) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
         User user = userService.getLoginUser(request);
-        long id = deleteRequest.getId();
+        String id = deleteRequest.getId();
         GrowthRecord oldRecord = growthRecordService.getById(id);
         ThrowUtils.throwIf(oldRecord == null, ErrorCode.NOT_FOUND_ERROR);
         // 仅本人或管理员可删除
