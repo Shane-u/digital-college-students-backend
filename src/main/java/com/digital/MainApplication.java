@@ -1,13 +1,20 @@
 package com.digital;
 
 import org.mybatis.spring.annotation.MapperScan;
+import org.springframework.ai.mcp.client.autoconfigure.McpClientAutoConfiguration;
+import org.springframework.ai.mcp.client.autoconfigure.McpToolCallbackAutoConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import io.github.cdimascio.dotenv.Dotenv;
 
-@SpringBootApplication
+@SpringBootApplication(
+        exclude = {
+                McpClientAutoConfiguration.class,
+                McpToolCallbackAutoConfiguration.class
+        }
+)
 @MapperScan("com.digital.mapper")
 @EnableScheduling
 @EnableAspectJAutoProxy(proxyTargetClass = true, exposeProxy = true)
