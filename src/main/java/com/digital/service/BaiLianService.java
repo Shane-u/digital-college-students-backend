@@ -4,6 +4,7 @@ import com.digital.model.dto.bailian.BaiLianChatRequest;
 import com.digital.model.dto.bailian.BaiLianCreateChatRequest;
 import com.digital.model.dto.bailian.BaiLianCreateChatResponse;
 import com.digital.model.dto.bailian.BaiLianStreamResponse;
+import com.digital.model.dto.chat.FinalChatMessageRequest;
 import com.digital.model.entity.ChatMessage;
 import com.digital.model.vo.ChatMessageVO;
 import com.digital.repository.ChatMessageRepository;
@@ -21,6 +22,7 @@ import reactor.core.publisher.Flux;
 import jakarta.annotation.Resource;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -131,15 +133,29 @@ public class BaiLianService {
                     .retrieve()
                     .bodyToFlux(String.class)
                     .timeout(Duration.ofMillis(timeout))
-                    .mapNotNull(line -> {
+                    .mapNotNull(rawLine -> {
+                        log.info("原始流式响应行: {}", rawLine);
                         try {
-                            if (StringUtils.isNotBlank(line)) {
-                                // 解析 JSON 响应
-                                return objectMapper.readValue(line, BaiLianStreamResponse.class);
+                            if (StringUtils.isBlank(rawLine)) {
+                                return null;
                             }
-                            return null;
+                            String line = rawLine.trim();
+                            String jsonPart = line.trim();
+
+                            // 如果 jsonPart 为空，但不是 [DONE]，仍然返回一个空的 BaiLianStreamResponse
+                            if (jsonPart.isEmpty()) {
+                                return new BaiLianStreamResponse();
+                            }
+                            // 跳过结束标记
+                            if ("[DONE]".equals(jsonPart)) {
+                                return null;
+                            }
+
+                            BaiLianStreamResponse response = objectMapper.readValue(jsonPart, BaiLianStreamResponse.class);
+                            log.info("解析后的 BaiLianStreamResponse: {}", response);
+                            return response;
                         } catch (Exception e) {
-                            log.warn("解析百炼流式响应失败: {}", line, e);
+                            log.error("解析百炼流式响应失败: 原始行={}, 错误={}", rawLine, e.getMessage(), e);
                             return null;
                         }
                     })
@@ -182,16 +198,27 @@ public class BaiLianService {
             saveUserMessage(chatId, userId, question);
         }
 
-        // 累积助手回复内容
-        StringBuilder assistantContent = new StringBuilder();
+        // 按数据块累积助手回复内容（与前端 SSE data 一一对应）
+        List<String> assistantChunks = new ArrayList<>();
+        // 记录知识库输出（dataset 节点的 outputList）
+        final String[] outputListChunkHolder = new String[1];
         AtomicBoolean isAssistantMessageSaved = new AtomicBoolean(false);
 
         streamChat(chatRequest)
                 .subscribe(
                         response -> {
-                            // 累积内容
-                            if (StringUtils.isNotBlank(response.getContent())) {
-                                assistantContent.append(response.getContent());
+                            // 按顺序累积每个 content，便于后续根据「倒数第三个 data」等规则构建最终持久化内容
+                            String contentPiece = response.getContent();
+                            if (StringUtils.isNotBlank(contentPiece)) {
+                                assistantChunks.add(contentPiece);
+
+                                // 捕获一次 outputList 详情（dataset 节点）
+                                if (outputListChunkHolder[0] == null
+                                        && StringUtils.isNotBlank(response.getNodeType())
+                                        && "dataset".equalsIgnoreCase(response.getNodeType())
+                                        && contentPiece.contains("<details><summary>outputList</summary>")) {
+                                    outputListChunkHolder[0] = contentPiece;
+                                }
                             }
 
                             // 调用原始回调
@@ -199,9 +226,10 @@ public class BaiLianService {
 
                             // 如果流结束，保存助手消息
                             if (Boolean.TRUE.equals(response.getIsEnd()) && userId != null && StringUtils.isNotBlank(chatId)) {
-                                String content = assistantContent.toString();
-                                if (StringUtils.isNotBlank(content) && isAssistantMessageSaved.compareAndSet(false, true)) {
-                                    saveAssistantMessage(chatId, userId, content);
+                                String finalContent = buildAssistantContentForSave(assistantChunks, outputListChunkHolder[0]);
+                                if (StringUtils.isNotBlank(finalContent)
+                                        && isAssistantMessageSaved.compareAndSet(false, true)) {
+                                    saveAssistantMessage(chatId, userId, finalContent);
                                 }
                             }
                         },
@@ -209,9 +237,10 @@ public class BaiLianService {
                             log.error("百炼流式聊天回调异常", error);
                             // 即使出错，也尝试保存已累积的内容
                             if (userId != null && StringUtils.isNotBlank(chatId)) {
-                                String content = assistantContent.toString();
-                                if (StringUtils.isNotBlank(content) && isAssistantMessageSaved.compareAndSet(false, true)) {
-                                    saveAssistantMessage(chatId, userId, content);
+                                String finalContent = buildAssistantContentForSave(assistantChunks, outputListChunkHolder[0]);
+                                if (StringUtils.isNotBlank(finalContent)
+                                        && isAssistantMessageSaved.compareAndSet(false, true)) {
+                                    saveAssistantMessage(chatId, userId, finalContent);
                                 }
                             }
                         },
@@ -219,13 +248,87 @@ public class BaiLianService {
                             log.debug("百炼流式聊天回调完成");
                             // 确保保存助手消息（如果还没有保存）
                             if (userId != null && StringUtils.isNotBlank(chatId)) {
-                                String content = assistantContent.toString();
-                                if (StringUtils.isNotBlank(content) && isAssistantMessageSaved.compareAndSet(false, true)) {
-                                    saveAssistantMessage(chatId, userId, content);
+                                String finalContent = buildAssistantContentForSave(assistantChunks, outputListChunkHolder[0]);
+                                if (StringUtils.isNotBlank(finalContent)
+                                        && isAssistantMessageSaved.compareAndSet(false, true)) {
+                                    saveAssistantMessage(chatId, userId, finalContent);
                                 }
                             }
                         }
                 );
+    }
+
+    /**
+     * 根据「只保留倒数第三个 data + outputList」的规则，构建要持久化到 MongoDB 的助手内容
+     *
+     * 规则说明（以流式 SSE data 为基准）：
+     * - outputListChunk：来自 dataset 节点的知识库检索结果（带 <details><summary>outputList</summary>）
+     * - assistantChunks：按顺序收集的所有 content 片段
+     * - 正常情况下，assistantChunks 的倒数第三个元素是：
+     *      <think>...（思考）...</think> + 最终的可见回答
+     *   倒数第二个是换行，倒数第一个对应 [DONE] 的前置空 data（前端本来也不会渲染）
+     *
+     * 因此，这里按照：
+     *   最终内容 = outputListChunk（如果存在） + 倒数第三个 content（如果存在）
+     */
+    private String buildAssistantContentForSave(List<String> assistantChunks, String outputListChunk) {
+        if (assistantChunks == null || assistantChunks.isEmpty()) {
+            return null;
+        }
+
+        StringBuilder builder = new StringBuilder();
+
+        // 先拼接知识库检索内容（outputList）
+        if (StringUtils.isNotBlank(outputListChunk)) {
+            builder.append(outputListChunk);
+        }
+
+        // 再追加倒数第三个 data（通常是「<think>... + 最终回答」这一整块）
+        if (assistantChunks.size() >= 3) {
+            String thirdFromLast = assistantChunks.get(assistantChunks.size() - 3);
+            if (StringUtils.isNotBlank(thirdFromLast)) {
+                builder.append(thirdFromLast);
+            }
+        } else {
+            // 极端情况下（比如总共不足 3 个片段），回退到最后一个非空 content
+            for (int i = assistantChunks.size() - 1; i >= 0; i--) {
+                String piece = assistantChunks.get(i);
+                if (StringUtils.isNotBlank(piece)) {
+                    builder.append(piece);
+                    break;
+                }
+            }
+        }
+
+        String result = builder.toString();
+        return StringUtils.isBlank(result) ? null : result;
+    }
+
+    /**
+     * 清理消息内容中的冗余标签和调试信息。
+     * 移除 `<details><summary>outputList</summary>...</details>` 和 `<think>...</think>` 等标签。
+     *
+     * @param content 原始消息内容
+     * @return 清理后的消息内容
+     */
+    private String cleanContent(String content) {
+        if (StringUtils.isBlank(content)) {
+            return content;
+        }
+
+        String cleanedContent = content;
+
+        // 移除 <details><summary>outputList</summary>...</details> 及其内容
+        cleanedContent = cleanedContent.replaceAll("(?s)<details>\\s*<summary>outputList</summary>.*?</details>", "");
+        // 移除 <details><summary>outputList.output</summary></details>
+        cleanedContent = cleanedContent.replaceAll("(?s)<details>\\s*<summary>outputList\\.output</summary>\\s*</details>", "");
+        // 移除 <think>...</think> 及其内容
+        cleanedContent = cleanedContent.replaceAll("(?s)<think>.*?</think>", "");
+
+        // 移除多余的空行，并trim
+        cleanedContent = cleanedContent.replaceAll("\\n\\s*\\n+", "\n").trim();
+
+        return cleanedContent;
     }
 
     /**
@@ -271,8 +374,11 @@ public class BaiLianService {
             return;
         }
 
+        // 在保存前进行内容清洗，移除无关的 HTML 标签和调试信息
+        content = cleanContent(content);
+
         if (StringUtils.isBlank(content)) {
-            log.warn("助手消息内容为空，跳过保存: sessionId={}, userId={}", sessionId, userId);
+            log.warn("助手消息内容为空(或清洗后为空)，跳过保存: sessionId={}, userId={}", sessionId, userId);
             return;
         }
 
@@ -291,6 +397,44 @@ public class BaiLianService {
                     sessionId, saved.getId(), userId, content.length());
         } catch (Exception e) {
             log.error("保存助手消息失败: sessionId={}, userId={}, error={}",
+                    sessionId, userId, e.getMessage(), e);
+            // 不抛出异常，避免影响主流程
+        }
+    }
+
+    /**
+     * 保存前端最终组装好的助手消息
+     */
+    public void saveFinalAssistantMessage(FinalChatMessageRequest request) {
+        Long userId = request.getUserId();
+        String sessionId = request.getChatId();
+        String content = request.getFinalContent();
+
+        if (userId == null) {
+            log.error("用户ID为空，无法保存最终助手消息: sessionId={}", sessionId);
+            return;
+        }
+
+        if (StringUtils.isBlank(content)) {
+            log.warn("最终助手消息内容为空，跳过保存: sessionId={}, userId={}", sessionId, userId);
+            return;
+        }
+
+        try {
+            ChatMessage chatMessage = new ChatMessage();
+            chatMessage.setId(UUID.randomUUID().toString());
+            chatMessage.setSessionId(sessionId);
+            chatMessage.setUserId(userId);
+            chatMessage.setRole("assistant");
+            chatMessage.setContent(content);
+            chatMessage.setCreateTime(LocalDateTime.now());
+            chatMessage.setIsDelete(false);
+
+            ChatMessage saved = chatMessageRepository.save(chatMessage);
+            log.info("保存最终助手消息成功: sessionId={}, messageId={}, userId={}, contentLength={}",
+                    sessionId, saved.getId(), userId, content.length());
+        } catch (Exception e) {
+            log.error("保存最终助手消息失败: sessionId={}, userId={}, error={}",
                     sessionId, userId, e.getMessage(), e);
             // 不抛出异常，避免影响主流程
         }

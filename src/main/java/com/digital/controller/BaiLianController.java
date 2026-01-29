@@ -4,6 +4,7 @@ import com.digital.common.BaseResponse;
 import com.digital.common.ResultUtils;
 
 import com.digital.model.dto.bailian.BaiLianChatRequest;
+import com.digital.model.dto.chat.FinalChatMessageRequest;
 import com.digital.model.entity.User;
 import com.digital.model.vo.ChatMessageVO;
 import com.digital.service.BaiLianService;
@@ -111,7 +112,14 @@ public class BaiLianController {
     }
 
     /**
-     * 基于WebFlux的流式接口
+     * 基于 WebFlux 的流式接口（前端使用 fetch 手动解析 SSE）
+     *
+     * 返回的数据格式类似：
+     *   event:message
+     *   data:xxx
+     *
+     *   event:done
+     *   data:[DONE]
      */
     @PostMapping(value = "/chat/stream/flux", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> streamChatFlux(@RequestBody BaiLianChatRequest chatRequest, HttpServletRequest request) {
@@ -131,27 +139,47 @@ public class BaiLianController {
 
         chatRequest.setStream(true);
 
-        return Flux.<ServerSentEvent<String>>create(sink -> {
-            Schedulers.boundedElastic().schedule(() -> {
-                // 使用带消息保存功能的方法
-                baiLianService.streamChatWithCallbackAndSave(chatRequest, streamResponse -> {
-                    if (sink.isCancelled()) {
-                        return;
-                    }
-
+        // 这里直接使用 BaiLianService.streamChat 返回的 Flux，
+        // 由 Spring 将每个 ServerSentEvent 序列化为标准 SSE 文本：
+        // event:xxx\ndata:yyy\n\n
+        return baiLianService.streamChat(chatRequest)
+                .publishOn(Schedulers.boundedElastic())
+                .map(streamResponse -> {
+                    log.info("Controller 收到 streamResponse: {}", streamResponse);
                     String content = streamResponse.getContent();
+
+                    Boolean isEnd = streamResponse.getIsEnd();
+
+                    // 把空格和换行做一次转义，避免被 SSE/HTTP 解析时打散
                     if (StringUtils.isNotEmpty(content)) {
                         String encoded = content.replace(" ", "&#32;").replace("\n", "&#92n");
-                        sink.next(ServerSentEvent.builder(encoded).event("message").build());
+                        return ServerSentEvent.builder(encoded)
+                                .event("message")
+                                .build();
                     }
 
-                    if (Boolean.TRUE.equals(streamResponse.getIsEnd())) {
-                        sink.next(ServerSentEvent.builder("[DONE]").event("done").build());
-                        sink.complete();
+                    // 如果内容为空，但不是结束标记，也发送一个空内容的 message 事件，避免前端阻塞
+                    if (StringUtils.isEmpty(content) && !Boolean.TRUE.equals(isEnd)) {
+                        return ServerSentEvent.builder("").event("message").build();
                     }
+
+                    // 结束标记
+                    if (Boolean.TRUE.equals(isEnd)) {
+                        return ServerSentEvent.<String>builder("[DONE]")
+                                .event("done")
+                                .build();
+                    }
+
+                    // 对于既没有 content 也没有结束标记的片段，前端无需处理，返回 null 后面会过滤掉
+                    return null;
+                })
+                .filter(event -> event != null)
+                .onErrorResume(e -> {
+                    log.error("百炼流式聊天（Flux）异常", e);
+                    return Flux.just(ServerSentEvent.builder("流式聊天异常: " + e.getMessage())
+                            .event("error")
+                            .build());
                 });
-            });
-        }).publishOn(Schedulers.boundedElastic());
     }
 
     /**
@@ -171,6 +199,30 @@ public class BaiLianController {
         } catch (Exception e) {
             log.error("获取消息列表失败：chatId={}, userId={}, error={}", chatId, userId, e.getMessage(), e);
             return ResultUtils.error(500, "获取消息列表失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 保存前端最终组装好的聊天消息
+     *
+     * @param finalChatMessageRequest 包含最终消息内容的请求
+     * @param request HTTP请求
+     * @return 基础响应
+     */
+    @PostMapping("/chat/save-final-message")
+    public BaseResponse<Void> saveFinalMessage(@RequestBody FinalChatMessageRequest finalChatMessageRequest, HttpServletRequest request) {
+        try {
+            // 解析用户ID
+            Long userId = resolveUserId(request, finalChatMessageRequest.getUserId());
+            if (userId == null) {
+                return ResultUtils.error(401, "用户未登录");
+            }
+            finalChatMessageRequest.setUserId(userId);
+            baiLianService.saveFinalAssistantMessage(finalChatMessageRequest);
+            return ResultUtils.success(null);
+        } catch (Exception e) {
+            log.error("保存最终聊天消息失败：error={}", e.getMessage(), e);
+            return ResultUtils.error(500, "保存最终聊天消息失败: " + e.getMessage());
         }
     }
 

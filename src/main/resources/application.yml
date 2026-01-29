@@ -16,6 +16,10 @@ spring:
         stdio:
           enabled: true
           servers-configuration: classpath:mcp/mcp-servers.json
+  logging:
+    level:
+      com.digital: DEBUG
+      reactor.netty: DEBUG
 #  mvc:
 #    pathmatch:
 #      matching-strategy: ant_path_matcher
@@ -215,6 +219,13 @@ huggingface:
     # Hugging Face Token
     api-key: ${HF_ASR_API_KEY}
     model: ${HF_ASR_MODEL}
+
+# 语音/对话控制前端 Agent
+web-agent:
+  # 临时：先转发到 realtime-demo 的 HTTP 接口，下发 WebRTC DataChannel 指令
+  relay-url: http://localhost:3001/send
+  # 指令生成模式：rule=规则（推荐先跑通）；llm=硅基流动生成（后续切换）
+  mode: rule
 
 flashcard:
   temp:

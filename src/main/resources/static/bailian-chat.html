@@ -244,6 +244,137 @@
             background: white;
             color: #333;
             border-bottom-left-radius: 4px;
+            /* Reset white-space for Markdown content */
+            white-space: normal;
+        }
+
+        /* Markdown Styles & Deep Thinking */
+        .think-block {
+            background: #f0f4f8;
+            border-left: 4px solid #667eea;
+            padding: 12px;
+            margin-bottom: 16px;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.9em;
+            color: #4a5568;
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        .think-label {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #667eea;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Markdown 内容样式 */
+        /* 段落 */
+        .message-content p {
+            font-size: 14px; /* 统一段落字体大小 */
+            margin-bottom: 10px;
+        }
+
+        .message-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        /* 标题 */
+        .message-content h1,
+        .message-content h2,
+        .message-content h3,
+        .message-content h4,
+        .message-content h5,
+        .message-content h6 {
+            font-weight: 700; /* 确保标题加粗 */
+            margin-top: 20px;
+            margin-bottom: 10px;
+            line-height: 1.4;
+            color: #333; /* 统一标题颜色 */
+        }
+
+        .message-content h3 {
+            font-size: 1.15em;
+            color: #4a5568;
+        }
+
+        /* 加粗文本 */
+        .message-content strong {
+            font-weight: 700; /* 确保粗体效果 */
+        }
+
+        /* 代码块 */
+        .message-content pre {
+            background: #282c34;
+            color: #abb2bf;
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
+
+        /* 内联代码 */
+        .message-content code {
+            background: rgba(0, 0, 0, 0.06);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #d63384;
+            word-break: break-word; /* 避免长代码导致溢出 */
+        }
+
+        .message-content pre code {
+            background: transparent;
+            padding: 0;
+            color: inherit;
+            font-size: 0.9em;
+        }
+
+        /* 无序列表和有序列表 */
+        .message-content ul, .message-content ol {
+            font-size: 14px; /* 统一列表字体大小 */
+            margin-left: 20px;
+            margin-bottom: 10px;
+            padding-left: 20px; /* 增加左边距以显示项目符号 */
+            list-style-type: disc; /* 默认无序列表项目符号 */
+            line-height: 1.6; /* 增加行高 */
+        }
+
+        .message-content ol {
+            list-style-type: decimal; /* 有序列表显示数字 */
+        }
+
+        .message-content li {
+            font-size: 14px; /* 统一列表项字体大小 */
+            margin-bottom: 4px;
+            line-height: 1.5; /* 增加行高，提升可读性 */
+        }
+
+        .message-content blockquote {
+            border-left: 4px solid #e2e8f0;
+            padding-left: 16px;
+            color: #718096;
+            margin: 10px 0;
+        }
+
+        .message-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .message-content th, .message-content td {
+            border: 1px solid #e2e8f0;
+            padding: 8px 12px;
+            text-align: left;
+        }
+
+        .message-content th {
+            background: #f7fafc;
+            font-weight: 600;
         }
 
         .message.system {
@@ -454,6 +585,8 @@
     <!-- SockJS and STOMP for WebSocket -->
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <!-- Marked.js for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <!-- 左侧会话列表 -->
@@ -509,6 +642,7 @@
     </div>
 
     <script>
+        marked.setOptions({ breaks: true });
         let currentChatId = null;
         let isStreaming = false;
         let sessions = []; // 会话列表
@@ -519,6 +653,144 @@
         
         let ws = null;
         
+        // Render Markdown Content
+        function renderContent(text) {
+            if (!text) return '';
+
+            let html = '';
+            let thinkContent = null;
+            let mainContent = text;
+            let knowledgeSourcesHtml = ''; // To store the rendered knowledge sources
+
+            // --- Phase 1: Extract and remove all <details> blocks for outputList and outputList.output ---
+            const outputListDetailsPattern = /<details><summary>(outputList(?:\.output)?)<\/summary>([\s\S]*?)<\/details>/g;
+            let outputListMatches = [];
+            
+            // 使用一个临时变量来处理文本，避免修改原始 text
+            let tempContent = text;
+            let match;
+
+            // 收集所有 outputList details 并从 tempContent 中移除
+            while ((match = outputListDetailsPattern.exec(tempContent)) !== null) {
+                const summaryText = match[1]; // "outputList" or "outputList.output"
+                const contentText = match[2]; // Content inside the details tag
+                outputListMatches.push({ summary: summaryText, content: contentText });
+            }
+            // 移除所有 outputList details 块
+            tempContent = tempContent.replace(outputListDetailsPattern, '').trim();
+
+            // --- Phase 2: Extract and select the second-to-last <think> block, then remove all <think> blocks ---
+            const thinkBlocks = [];
+            const thinkTagPattern = /<think>([\s\S]*?)<\/think>/g;
+            let thinkMatch;
+            while ((thinkMatch = thinkTagPattern.exec(tempContent)) !== null) {
+                thinkBlocks.push(thinkMatch[0]); // Store full think block including tags
+            }
+
+            if (thinkBlocks.length >= 2) {
+                thinkContent = thinkBlocks[thinkBlocks.length - 2].replace(/<think>|<\/think>/g, '').trim();
+            } else if (thinkBlocks.length === 1) {
+                thinkContent = thinkBlocks[0].replace(/<think>|<\/think>/g, '').trim();
+            } else {
+                thinkContent = null;
+            }
+
+            // 移除所有 <think> 块
+            tempContent = tempContent.replace(thinkTagPattern, '').trim();
+
+            // 将处理后的 tempContent 赋值给 processedMainContent
+            let processedMainContent = tempContent;
+
+            // --- Phase 3: De-duplicate processedMainContent if it's an exact X + X repetition (for the last main answer) ---
+            const mainContentLength = processedMainContent.length;
+            if (mainContentLength > 0 && mainContentLength % 2 === 0) {
+                const halfLength = mainContentLength / 2;
+                const firstHalf = processedMainContent.substring(0, halfLength);
+                const secondHalf = processedMainContent.substring(halfLength);
+                if (firstHalf === secondHalf) {
+                    processedMainContent = firstHalf.trim();
+                }
+            }
+            processedMainContent = processedMainContent; // 移除 trim()，让 marked.js 自行处理空格
+
+
+            // --- Phase 4: Render thinkContent and processedMainContent ---
+            if (thinkContent !== null && thinkContent !== '') { // Use !== '' after trimming
+                html += `<div class="think-block">
+                                    <div class="think-label">
+                                        <span style="animation: pulse 2s infinite">💭</span> 深度思考
+                                    </div>
+                                    <div class="think-content">${marked.parse(thinkContent)}</div>
+                                 </div>`;
+            }
+
+            if (processedMainContent && processedMainContent !== '') { // Use !== '' after trimming
+                html += marked.parse(processedMainContent);
+            }
+
+            // --- Phase 4: Process and append knowledge sources ---
+            if (outputListMatches.length > 0) {
+                let individualSourcesHtml = '';
+                outputListMatches.forEach((item, index) => {
+                    let formattedContent = '';
+                    let summaryTitle = item.summary;
+
+                    if (item.summary === 'outputList') {
+                        try {
+                            // Replace single quotes with double quotes for valid JSON parsing
+                            const jsonLikeString = item.content.trim().replace(/'/g, '"');
+                            try {
+                                const parsedJson = JSON.parse(jsonLikeString);
+                                formattedContent = `<pre><code class="json">${JSON.stringify(parsedJson, null, 2)}</code></pre>`;
+                            } catch (jsonParseError) {
+                                console.error(`Failed to parse outputList JSON after replacing single quotes:`, jsonParseError);
+                                // 如果 JSON 解析失败，直接将原始内容作为文本显示
+                                formattedContent = `<pre><code class="text">${item.content.trim()}</code></pre>`;
+                            }
+
+                            // Try to get document_name from the first item if available
+                            if (parsedJson.length > 0 && parsedJson[0].document_name) {
+                                summaryTitle = `知识来源: ${parsedJson[0].document_name}`;
+                            } else {
+                                summaryTitle = `知识来源: ${item.summary}`;
+                            }
+
+                        } catch (e) {
+                            console.error(`Failed to parse ${item.summary} JSON:`, e);
+                            formattedContent = `<pre><code class="text">${item.content.trim()}</code></pre>`;
+                            summaryTitle = `知识来源: ${item.summary} (原始数据)`;
+                        }
+                    } else if (item.summary === 'outputList.output') {
+                        formattedContent = marked.parse(item.content.trim());
+                        summaryTitle = `知识来源: ${item.summary}`;
+                    }
+
+                    individualSourcesHtml += `
+                        <details style="margin-bottom: 8px; border: 1px solid #e0e0e0; border-radius: 8px; background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                            <summary style="padding: 12px 16px; font-weight: 600; cursor: pointer; color: #667eea; display: flex; align-items: center; gap: 8px;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open-text"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/><path d="M10 12H8"/><path d="M16 12h2"/><path d="M16 18h2"/><path d="M10 18H8"/></svg>
+                                <span>${summaryTitle}</span>
+                            </summary>
+                            <div style="padding: 12px 16px; border-top: 1px solid #e0e0e0; background: #fcfcfc;">
+                                ${formattedContent}
+                            </div>
+                        </details>
+                    `;
+                });
+
+                knowledgeSourcesHtml = `
+                    <div style="margin-top: 24px; padding-top: 16px; border-top: 1px dashed #cccccc;">
+                        <div style="font-size: 16px; font-weight: 600; color: #4a5568; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-file-text"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+                            知识来源
+                        </div>
+                        ${individualSourcesHtml}
+                    </div>
+                `;
+            }
+            return html + knowledgeSourcesHtml;
+        }
+
         // 初始化
         window.addEventListener('DOMContentLoaded', function() {
             // 尝试从URL获取userId，或从localStorage获取
@@ -631,7 +903,7 @@
                 }
                 renderSessionList(sessions);
             } catch (error) {
-                console.error('加载会话列表失败:', error);
+                console.error('加载会话列��失败:', error);
                 sessions = [];
                 renderSessionList([]);
             }
@@ -730,8 +1002,10 @@
                         if (msg.role === 'user') {
                             addUserMessage(msg.content, msg.createTime);
                         } else if (msg.role === 'assistant') {
-                            const msgDiv = addAssistantMessage(msg.content, msg.createTime);
-                            // 如果有内容，添加闪卡按钮（可选）
+                            // 对历史消息内容也调用renderContent进行处理
+                            const processedContent = renderContent(msg.content);
+                            const msgDiv = addAssistantMessage(processedContent, msg.createTime);
+                            // 如果有内容，添加闪卡按钮（使用原始内容，不是渲染后的HTML）
                             if (msg.content && msg.content.trim().length > 50) {
                                 addFlashCardButton(msgDiv, msg.content);
                             }
@@ -831,7 +1105,8 @@
             try {
                 const messageDiv = addAssistantMessage('');
                 const contentDiv = messageDiv.querySelector('.message-content');
-                let fullContent = '';
+                let fullContent = ''; // 用于渲染的累积内容
+                let rawContentForSave = ''; // 用于保存的完整原始内容（包含所有数据块）
 
                 const response = await fetch(`${API_BASE}/chat/stream/flux`, {
                     method: 'POST',
@@ -851,6 +1126,7 @@
                 const decoder = new TextDecoder();
                 let buffer = '';
                 let isDone = false;
+                let isFirstData = true; // 新增标志，用于跳过第一个 data 事件
 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -868,7 +1144,7 @@
                         if (line.startsWith('event:')) {
                             continue;
                         }
-                        
+
                         if (line.startsWith('data:')) {
                             const data = line.substring(5).trim();
                             
@@ -877,20 +1153,53 @@
                                 continue;
                             }
 
+                            // 如果是第一个 data 事件且 fullContent 为空，则跳过此次处理
+                            if (isFirstData) {
+                                isFirstData = false; // 标记第一个 data 已处理
+                                continue;
+                            }
+                            isFirstData = false; // 确保后续数据不再视为第一个
+
                             const decoded = data.replace(/&#32;/g, ' ').replace(/&#92n/g, '\n');
-                            contentDiv.textContent += decoded;
+                            console.log("原始 data:", data); // 添加日志
+                            console.log("解码后的 decoded:", decoded); // 添加日志
+                            
+                            // 所有内容都累积到 rawContentForSave（用于持久化）
+                            rawContentForSave += decoded;
+                            
+                            // 后端在流式结束前，通常会再发送一个完整的
+                            // "<think>...思考...</think> + 最终回答" 的大块内容，
+                            // 这对应倒数第三个 data。为避免在前端重复渲染整段回答，
+                            // 这里对这种完整 <think> 块做过滤：只用前面的真正流式 token。
+                            if (decoded && decoded.includes('<think>') && decoded.includes('</think>')) {
+                                // 跳过这个聚合块的渲染，但已累积到 rawContentForSave
+                                continue;
+                            }
+
+                            // 空行（如倒数第二个 data: "\n"）在 trim 后会变成空字符串，这里也不渲染
+                            // if (!decoded || decoded.trim() === '') {
+                            //     continue;
+                            // }
+
                             fullContent += decoded;
+                            console.log("传递给 renderContent 的完整内容 (fullContent):", fullContent); // 添加日志
+                            contentDiv.innerHTML = renderContent(fullContent);
                             scrollToBottom();
                         }
                     }
                 }
 
-                if (!contentDiv.textContent.trim()) {
+                if (!contentDiv.textContent.trim() && !contentDiv.innerHTML.trim()) {
                     contentDiv.textContent = '(无响应)';
                 }
 
                 if (isDone && fullContent.trim()) {
                     addFlashCardButton(messageDiv, fullContent);
+                    
+                    // 流式结束后，调用后端接口保存完整的原始内容
+                    if (rawContentForSave.trim()) {
+                        await saveFinalMessage(fullContent);
+                    }
                 }
 
                 // 更新会话列表中的最后消息时间
@@ -915,6 +1224,35 @@
             }
         }
 
+        // 保存最终消息到后端
+        async function saveFinalMessage(finalContent) {
+            try {
+                const response = await fetch(`${API_BASE}/chat/save-final-message`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        chatId: currentChatId,
+                        userId: parseInt(currentUserId),
+                        finalContent: finalContent
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.code === 0) {
+                    console.log('最终消息保存成功');
+                } else {
+                    console.error('保存最终消息失败:', result.message);
+                    // 不显示错误提示，避免影响用户体验
+                }
+            } catch (error) {
+                console.error('保存最终消息异常:', error);
+                // 不显示错误提示，避免影响用户体验
+            }
+        }
+
         function addUserMessage(text, time) {
             const chatArea = document.getElementById('chatArea');
             const messageDiv = document.createElement('div');
@@ -936,8 +1274,10 @@
             messageDiv.className = 'message assistant';
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content';
-            contentDiv.innerHTML = escapeHtml(text);
-            
+
+            // 直接使用传入的内容 (假定调用方已处理好 HTML)
+            contentDiv.innerHTML = text;
+
             const timeStr = time ? formatTime(time) : formatTime(new Date().toISOString());
             const timeDiv = document.createElement('div');
             timeDiv.className = 'message-time';
