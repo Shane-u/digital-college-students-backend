@@ -134,7 +134,7 @@ public class BaiLianService {
                     .bodyToFlux(String.class)
                     .timeout(Duration.ofMillis(timeout))
                     .mapNotNull(rawLine -> {
-                        log.info("原始流式响应行: {}", rawLine);
+                        // log.info("原始流式响应行: {}", rawLine);
                         try {
                             if (StringUtils.isBlank(rawLine)) {
                                 return null;
@@ -152,7 +152,7 @@ public class BaiLianService {
                             }
 
                             BaiLianStreamResponse response = objectMapper.readValue(jsonPart, BaiLianStreamResponse.class);
-                            log.info("解析后的 BaiLianStreamResponse: {}", response);
+                            // log.info("解析后的 BaiLianStreamResponse: {}", response);
                             return response;
                         } catch (Exception e) {
                             log.error("解析百炼流式响应失败: 原始行={}, 错误={}", rawLine, e.getMessage(), e);
