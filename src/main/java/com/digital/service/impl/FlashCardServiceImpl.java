@@ -324,7 +324,7 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         return flashCards.stream().map(this::getFlashCardVO).collect(Collectors.toList());
     }
 
-    @Override
+
     public List<FlashCardVO> getTempUserFlashCards(Long userId) {
         // 使用 scan 查找所有 temporary flashcards key
         // 注意：这种 scan 方式在生产环境中可能效率较低，且只能匹配特定的前缀，
@@ -410,7 +410,7 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         return this.removeById(flashCardId);
     }
 
-    @Override
+
     public boolean deleteTempFlashCard(Long userId, String tempFlashCardId) {
          // 验证所有权
          FlashCard flashCard = (FlashCard) redisTemplate.opsForValue().get(tempFlashCardId);

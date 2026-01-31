@@ -15,7 +15,6 @@ import com.digital.model.vo.FlashCardProgressVO; // 新增导入
 import com.digital.manager.FlashCardProgressManager; // 新增导入
 import com.digital.service.FlashCardService;
 import com.digital.service.UserService;
-import org.springframework.data.redis.core.RedisTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -213,9 +212,10 @@ public class FlashCardController {
 
     /**
      * 查看临时闪卡详情（用于预览）
+     *
      * @param tempFlashCardId 临时闪卡ID
-     * @param httpServletRequest
-     * @return
+     * @param httpServletRequest HttpServletRequest
+     * @return 临时闪卡详情
      */
     @GetMapping("/temp")
     public BaseResponse<FlashCardVO> getTempFlashCard(@org.springframework.web.bind.annotation.RequestParam("id") String tempFlashCardId,

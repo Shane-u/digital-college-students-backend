@@ -80,5 +80,21 @@ public interface FlashCardService extends IService<FlashCard> {
      * 根据String类型的闪卡ID获取闪卡（优先从Redis，然后从DB）
      */
     FlashCard getFlashCardByIdString(String flashCardId);
-}
 
+    /**
+     * 获取用户的暂存（临时）闪卡列表
+     *
+     * @param userId 用户ID
+     * @return 临时闪卡列表（VO）
+     */
+    List<FlashCardVO> getTempUserFlashCards(Long userId);
+
+    /**
+     * 删除临时闪卡及其进度
+     *
+     * @param userId         用户ID
+     * @param tempFlashCardId 临时闪卡ID
+     * @return 是否删除成功
+     */
+    boolean deleteTempFlashCard(Long userId, String tempFlashCardId);
+}
