@@ -14,7 +14,7 @@ import (
 
 func main() {
 	// shane: 加载 .env 文件
-	if err := godotenv.Load(); err != nil {
+	if err := godotenv.Overload(); err != nil {
 		logrus.Warnf("failed to load .env file: %v, using environment variables", err)
 	}
 

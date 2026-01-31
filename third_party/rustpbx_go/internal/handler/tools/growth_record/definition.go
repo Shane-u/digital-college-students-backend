@@ -92,3 +92,39 @@ func DefinitionAddToday() tools.SFTool {
 		},
 	}
 }
+
+// DefinitionSaveGrowthRecord 定义保存成长记录 function
+func DefinitionSaveGrowthRecord() tools.SFTool {
+	return tools.SFTool{
+		Type: "function",
+		Function: struct {
+			Description string      `json:"description"`
+			Name        string      `json:"name"`
+			Parameters  interface{} `json:"parameters"`
+			Required    []string    `json:"required"`
+		}{
+			Description: "保存当前打开的成长记录。当用户说「保存」「保存记录」「确认保存」等时调用。只有在成长记录弹窗打开时才能使用。无需参数。",
+			Name:        "saveGrowthRecord",
+			Parameters:  struct{}{},
+			Required:    []string{},
+		},
+	}
+}
+
+// DefinitionCancelGrowthRecord 定义取消成长记录 function
+func DefinitionCancelGrowthRecord() tools.SFTool {
+	return tools.SFTool{
+		Type: "function",
+		Function: struct {
+			Description string      `json:"description"`
+			Name        string      `json:"name"`
+			Parameters  interface{} `json:"parameters"`
+			Required    []string    `json:"required"`
+		}{
+			Description: "取消当前打开的成长记录编辑。当用户说「取消」「取消保存」「不保存了」等时调用。只有在成长记录弹窗打开时才能使用。无需参数。",
+			Name:        "cancelGrowthRecord",
+			Parameters:  struct{}{},
+			Required:    []string{},
+		},
+	}
+}

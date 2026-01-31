@@ -125,3 +125,57 @@ func HandleAddToday(ctx *tools.ToolContext, args string) (string, error) {
 
 	return "已发送添加今日记录的指令。", nil
 }
+
+// HandleSave 执行保存成长记录：发送指令到前端，让前端触发保存功能
+func HandleSave(ctx *tools.ToolContext, args string) (string, error) {
+	if ctx.Logger != nil {
+		ctx.Logger.Info("[saveGrowthRecord] Handler called")
+	}
+
+	if ctx.FrontendSender != nil {
+		payload := map[string]string{
+			"type": "saveGrowthRecord",
+		}
+		result, err := ctx.FrontendSender.SendCommand(payload)
+		if err != nil {
+			if ctx.Logger != nil {
+				ctx.Logger.WithError(err).Warn("saveGrowthRecord: frontend SendCommand failed")
+			}
+			return "已发送保存记录的指令。", nil
+		}
+		if result != "" {
+			return result, nil
+		}
+	} else if ctx.Logger != nil {
+		ctx.Logger.Info("[saveGrowthRecord] FrontendSender 未配置，仅返回文案")
+	}
+
+	return "已发送保存记录的指令。", nil
+}
+
+// HandleCancel 执行取消成长记录：发送指令到前端，让前端触发取消功能
+func HandleCancel(ctx *tools.ToolContext, args string) (string, error) {
+	if ctx.Logger != nil {
+		ctx.Logger.Info("[cancelGrowthRecord] Handler called")
+	}
+
+	if ctx.FrontendSender != nil {
+		payload := map[string]string{
+			"type": "cancelGrowthRecord",
+		}
+		result, err := ctx.FrontendSender.SendCommand(payload)
+		if err != nil {
+			if ctx.Logger != nil {
+				ctx.Logger.WithError(err).Warn("cancelGrowthRecord: frontend SendCommand failed")
+			}
+			return "已发送取消记录的指令。", nil
+		}
+		if result != "" {
+			return result, nil
+		}
+	} else if ctx.Logger != nil {
+		ctx.Logger.Info("[cancelGrowthRecord] FrontendSender 未配置，仅返回文案")
+	}
+
+	return "已发送取消记录的指令。", nil
+}
