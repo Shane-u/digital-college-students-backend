@@ -170,10 +170,16 @@ impl Track for TtsTrack {
         let command_loop = async move {
             let mut last_play_id = None;
             while let Some(command) = command_rx.recv().await {
-                let text = command.text;
+                let text = command.text.trim().to_string();
                 let speaker = command.speaker;
                 let play_id = command.play_id;
                 let option = command.option;
+
+                // 过滤空文本，避免调用TTS API导致参数错误
+                if text.is_empty() {
+                    warn!("skipping empty tts text");
+                    continue;
+                }
 
                 if play_id != last_play_id || play_id.is_none() {
                     last_play_id = play_id.clone();
@@ -187,30 +193,42 @@ impl Track for TtsTrack {
                 );
                 synthesize_done.store(false, Ordering::Relaxed);
 
+                // 禁用TTS缓存 - 缓存可能包含空数据或损坏的音频
+                // 强制每次都实时合成以确保音频有效性
                 if use_cache {
                     match cache::is_cached(&cache_key).await {
                         Ok(true) => match cache::retrieve_from_cache(&cache_key).await {
                             Ok(audio) => {
-                                info!(" using cached audio for {}", cache_key);
-                                buffer_clone.lock().await.extend(bytes_to_samples(&audio));
-                                synthesize_done.store(true, Ordering::Relaxed);
-                                event_sender
-                                    .send(SessionEvent::Metrics {
-                                        timestamp: crate::get_timestamp(),
-                                        key: format!("completed.tts.{}", client.provider()),
-                                        data: serde_json::json!({
-                                                "speaker": speaker,
-                                                "playId": play_id,
-                                                "length": audio.len(),
-                                                "cached": true,
-                                        }),
-                                        duration: 0,
-                                    })
-                                    .ok();
-                                continue;
+                                // 验证缓存音频长度，至少需要1600字节（约50ms的16kHz PCM音频）
+                                // 如果缓存数据太小，则跳过缓存，重新合成
+                                let min_audio_bytes = (sample_rate as usize / 20) * 2; // 50ms的PCM数据
+                                if audio.len() < min_audio_bytes {
+                                    warn!("cached audio too short ({} bytes < {} bytes), re-synthesizing for: {}", 
+                                          audio.len(), min_audio_bytes, cache_key);
+                                    // 删除无效缓存
+                                    cache::delete_from_cache(&cache_key).await.ok();
+                                } else {
+                                    info!("using cached audio for {} ({} bytes)", cache_key, audio.len());
+                                    buffer_clone.lock().await.extend(bytes_to_samples(&audio));
+                                    synthesize_done.store(true, Ordering::Relaxed);
+                                    event_sender
+                                        .send(SessionEvent::Metrics {
+                                            timestamp: crate::get_timestamp(),
+                                            key: format!("completed.tts.{}", client.provider()),
+                                            data: serde_json::json!({
+                                                    "speaker": speaker,
+                                                    "playId": play_id,
+                                                    "length": audio.len(),
+                                                    "cached": true,
+                                            }),
+                                            duration: 0,
+                                        })
+                                        .ok();
+                                    continue;
+                                }
                             }
                             Err(e) => {
-                                warn!(" error retrieving cached audio: {}", e);
+                                warn!("error retrieving cached audio: {}", e);
                             }
                         },
                         _ => {}
@@ -303,9 +321,13 @@ impl Track for TtsTrack {
                             client.provider()
                         );
 
-                        // Cache the complete audio if caching is enabled
-                        if use_cache && !audio_chunks.is_empty() {
-                            // Combine all chunks for caching
+                        // 验证音频数据有效性，只有有效音频才缓存
+                        let min_audio_bytes = (sample_rate as usize / 20) * 2; // 50ms的PCM数据
+                        if total_audio_len < min_audio_bytes {
+                            warn!("synthesized audio too short ({} bytes), not caching for: {}", 
+                                  total_audio_len, text);
+                        } else if use_cache && !audio_chunks.is_empty() {
+                            // Cache the complete audio if caching is enabled and audio is valid
                             let complete_audio: Vec<u8> =
                                 audio_chunks.into_iter().flatten().collect();
                             cache::store_in_cache(&cache_key, &complete_audio)
@@ -341,18 +363,33 @@ impl Track for TtsTrack {
         let processor_chain = self.processor_chain.clone();
         let emit_loop = async move {
             let start_time = Instant::now();
+            let mut consecutive_empty_checks = 0;
+            const MAX_EMPTY_CHECKS: u32 = 10; // 等待最多10个ptime周期（约200ms@20ms ptime）
+            
             loop {
                 let packet = {
                     let mut buffer = buffer.lock().await;
-                    if buffer.len() > max_pcm_chunk_size {
+                    if buffer.len() >= max_pcm_chunk_size {
+                        consecutive_empty_checks = 0; // 重置空检查计数器
                         let s16_data = buffer.drain(..max_pcm_chunk_size).collect::<Vec<_>>();
                         Some(s16_data)
-                    } else {
-                        if synthesize_done_clone.load(Ordering::Relaxed) {
+                    } else if !buffer.is_empty() && synthesize_done_clone.load(Ordering::Relaxed) {
+                        // 合成完成且还有剩余数据，发送剩余数据
+                        consecutive_empty_checks = 0;
+                        let s16_data = buffer.drain(..).collect::<Vec<_>>();
+                        Some(s16_data)
+                    } else if synthesize_done_clone.load(Ordering::Relaxed) {
+                        // 合成完成且buffer为空
+                        consecutive_empty_checks += 1;
+                        if consecutive_empty_checks >= MAX_EMPTY_CHECKS {
+                            // 连续多次检查buffer仍然为空，真正结束
                             break;
-                        } else {
-                            None
                         }
+                        None
+                    } else {
+                        // 合成尚未完成，等待更多数据
+                        consecutive_empty_checks = 0;
+                        None
                     }
                 };
                 if let Some(packet) = packet {
