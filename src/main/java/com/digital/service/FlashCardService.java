@@ -31,24 +31,9 @@ public interface FlashCardService extends IService<FlashCard> {
     List<FlashCardVO> getUserFlashCards(Long userId);
 
     /**
-     * 获取用户的暂存闪卡列表（Redis中）
-     */
-    List<FlashCardVO> getTempUserFlashCards(Long userId);
-
-    /**
      * 获取需要复习的闪卡列表
      */
     List<FlashCardVO> getReviewFlashCards(Long userId);
-
-    /**
-     * 确认保存暂存闪卡
-     */
-    boolean confirmFlashCard(Long userId, String tempFlashCardId);
-
-    /**
-     * 删除暂存闪卡
-     */
-    boolean deleteTempFlashCard(Long userId, String tempFlashCardId);
 
     /**
      * 更新闪卡
@@ -81,7 +66,19 @@ public interface FlashCardService extends IService<FlashCard> {
      */
     String getFlashCardStatus(String flashCardId);
 
+    /**
+     * 确认保存闪卡到终库
+     */
+    boolean confirmFlashCard(Long userId, String flashCardId);
+
+    /**
+     * 删除临时闪卡
+     */
     void removeTempFlashCard(String flashCardId);
 
+    /**
+     * 根据String类型的闪卡ID获取闪卡（优先从Redis，然后从DB）
+     */
     FlashCard getFlashCardByIdString(String flashCardId);
 }
+
