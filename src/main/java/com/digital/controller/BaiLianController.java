@@ -135,6 +135,8 @@ public class BaiLianController {
         Long userId = resolveUserId(request, chatRequest.getUserId());
         if (userId != null) {
             chatRequest.setUserId(userId);
+            // Flux 模式也保存用户提问
+            baiLianService.saveUserMessage(chatRequest.getChatId(), userId, chatRequest.getQuestion());
         }
 
         chatRequest.setStream(true);
@@ -192,9 +194,14 @@ public class BaiLianController {
     @GetMapping("/chat/{chatId}/messages")
     public BaseResponse<List<ChatMessageVO>> getMessages(
             @PathVariable String chatId,
-            @RequestParam Long userId) {
+            @RequestParam(required = false) Long userId,
+            HttpServletRequest request) {
         try {
-            List<ChatMessageVO> messages = baiLianService.getMessages(chatId, userId);
+            Long resolvedUserId = resolveUserId(request, userId);
+            if (resolvedUserId == null) {
+                return ResultUtils.error(401, "未识别到有效用户ID");
+            }
+            List<ChatMessageVO> messages = baiLianService.getMessages(chatId, resolvedUserId);
             return ResultUtils.success(messages);
         } catch (Exception e) {
             log.error("获取消息列表失败：chatId={}, userId={}, error={}", chatId, userId, e.getMessage(), e);

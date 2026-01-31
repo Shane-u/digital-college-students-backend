@@ -334,7 +334,7 @@ public class BaiLianService {
     /**
      * 保存用户消息
      */
-    private void saveUserMessage(String sessionId, Long userId, String content) {
+    public void saveUserMessage(String sessionId, Long userId, String content) {
         if (userId == null) {
             log.error("用户ID为空，无法保存用户消息: sessionId={}", sessionId);
             return;
