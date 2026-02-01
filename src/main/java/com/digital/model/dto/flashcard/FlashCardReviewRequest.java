@@ -14,7 +14,7 @@ public class FlashCardReviewRequest implements Serializable {
     /**
      * 闪卡id
      */
-    private Long id;
+    private String id;
 
     /**
      * 难度等级（1-重来，2-困难，3-良好，4-简单）

@@ -14,7 +14,7 @@ public class FlashCardUpdateRequest implements Serializable {
     /**
      * 闪卡id
      */
-    private Long id;
+    private String id;
 
     /**
      * 知识点标题

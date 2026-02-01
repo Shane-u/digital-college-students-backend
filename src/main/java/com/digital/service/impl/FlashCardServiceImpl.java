@@ -19,7 +19,7 @@ import com.digital.model.entity.FlashCard;
 import com.digital.model.vo.FlashCardVO;
 import com.digital.event.FlashCardGeneratedEvent;
 import com.digital.service.FlashCardService;
-import com.digital.service.UserService;
+import com.digital.service.Neo4jFlashCardService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -33,10 +33,17 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import com.digital.utils.SM2Algorithm;
+import com.digital.utils.SM2Algorithm.Grade;
+import com.digital.utils.SM2Algorithm.SM2Result;
+import java.util.stream.IntStream;
 
 /**
  * 记忆闪卡服务实现
@@ -50,9 +57,6 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
 
     @Resource
     private SiliconFlowManager siliconFlowManager;
-
-    // @Resource
-    // private UserService userService; // Remove unused field
 
     @Resource
     private ApplicationContext applicationContext;
@@ -68,6 +72,9 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
 
     @Resource
     private FlashCardProgressManager flashCardProgressManager;
+
+    @Resource
+    private Neo4jFlashCardService neo4jFlashCardService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -207,20 +214,24 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         flashCard.setContent("闪卡正在生成中，请稍候...");
         flashCard.setHtmlContent("<div style='padding: 20px; text-align: center;'><p>闪卡正在生成中，请稍候...</p></div>");
         flashCard.setOriginalContent(request.getOriginalContent());
-        flashCard.setReviewCount(0);
+        flashCard.setRepetition(0);
         flashCard.setDifficultyLevel(null);
+        flashCard.setEf(SM2Algorithm.INITIAL_EF); // 初始化 EF
+        flashCard.setInterval(0); // 初始化间隔
+        flashCard.setEf(SM2Algorithm.INITIAL_EF); // 初始化 EF
+        flashCard.setInterval(0); // 初始化间隔
         
         Calendar calendar = Calendar.getInstance();
         calendar.add(Calendar.MINUTE, 1);
         flashCard.setNextReviewTime(calendar.getTime());
 
         // 将初始闪卡信息保存到 Redis 暂存库
-        redisTemplate.opsForValue().set(tempFlashCardId, flashCard, tempFlashCardExpirationDays, java.util.concurrent.TimeUnit.DAYS);
+        redisTemplate.opsForValue().set(tempFlashCardId, flashCard, tempFlashCardExpirationDays, TimeUnit.DAYS);
         
         // 记录到用户的临时闪卡 Set 中
         String userTempSetKey = "user_temp_flashcards:" + userId;
         redisTemplate.opsForSet().add(userTempSetKey, tempFlashCardId);
-        redisTemplate.expire(userTempSetKey, tempFlashCardExpirationDays, java.util.concurrent.TimeUnit.DAYS); // 设置过期时间
+        redisTemplate.expire(userTempSetKey, tempFlashCardExpirationDays, TimeUnit.DAYS); // 设置过期时间
 
         // 初始化进度跟踪，使用临时闪卡ID
         flashCardProgressManager.initProgress(tempFlashCardId, userId);
@@ -256,7 +267,7 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
             chatRequest.setModel(null);
             chatRequest.setStream(false);
             chatRequest.setMessages(List.of(new Message("user", prompt)));
-
+            // 调用siliconflow大模型
             ChatResponse response = siliconFlowManager.chat(chatRequest);
             if (response == null || response.getContent() == null) {
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, "AI返回内容为空");
@@ -325,39 +336,77 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
     }
 
 
+    /**
+     * 获取用户的临时闪卡列表
+     * 
+     * 实现方案：使用 Redis Set 维护用户拥有的临时闪卡 key 列表
+     * - 生成闪卡时：将 key 添加到 user_temp_flashcards:{userId} Set 中
+     * - 获取闪卡时：从 Set 中获取所有 key，然后批量 get（高效）
+     * - 删除闪卡时：从 Set 中移除对应的 key
+     * 
+     * @param userId 用户ID
+     * @return 临时闪卡列表
+     */
     public List<FlashCardVO> getTempUserFlashCards(Long userId) {
-        // 使用 scan 查找所有 temporary flashcards key
-        // 注意：这种 scan 方式在生产环境中可能效率较低，且只能匹配特定的前缀，
-        // 如果 Redis key 数量巨大，建议使用 set 维护用户拥有的 temp flashcard list
-        // 此处为了简单实现，假设用户最近的临时闪卡都存在 user_temp_flashcards:{userId} 这个 List 中
-        // 或者我们遍历 redis 中的 temp_flashcard:* keys (不推荐)
-
-        // 更好的方案：当生成闪卡时，将 key 添加到一个以 userId 为 key 的 Set 中：user_temp_flashcards:{userId}
-        // 获取时，先获取 set 中的所有 key，然后批量 get
-
         String userTempSetKey = "user_temp_flashcards:" + userId;
-        java.util.Set<Object> keys = redisTemplate.opsForSet().members(userTempSetKey);
+        Set<Object> keys = redisTemplate.opsForSet().members(userTempSetKey);
 
         if (keys == null || keys.isEmpty()) {
             return List.of();
         }
 
-        List<Object> objects = redisTemplate.opsForValue().multiGet(keys.stream().map(Object::toString).collect(Collectors.toList()));
+        List<String> keyList = keys.stream().map(Object::toString).collect(Collectors.toList());
+        List<Object> objects = redisTemplate.opsForValue().multiGet(keyList);
 
         if (objects == null) {
             return List.of();
         }
 
-        return objects.stream()
-                .filter(obj -> obj instanceof FlashCard)
-                .map(obj -> (FlashCard) obj)
-                .map(this::getFlashCardVO)
+        // 用于收集已过期的 key，后续从 Set 中移除
+        List<String> expiredKeys = new ArrayList<>();
+
+        List<FlashCardVO> result = IntStream.range(0, objects.size())
+                .filter(i -> {
+                    // 过滤掉 null 值（已过期的闪卡）
+                    if (objects.get(i) == null) {
+                        expiredKeys.add(keyList.get(i));
+                        return false;
+                    }
+                    return objects.get(i) instanceof FlashCard;
+                })
+                .mapToObj(i -> {
+                    FlashCard flashCard = (FlashCard) objects.get(i);
+                    FlashCardVO vo = getFlashCardVO(flashCard);
+                    
+                    // 计算过期天数
+                    String flashCardKey = keyList.get(i);
+                    Long expireTime = redisTemplate.getExpire(flashCardKey, TimeUnit.SECONDS);
+                    
+                    if (expireTime != null && expireTime > 0) {
+                        // 将秒转换为天数（向上取整）
+                        long days = (expireTime + 86400 - 1) / 86400; // 86400秒 = 1天
+                        vo.setExpirationDays(days);
+                    } else {
+                        // 如果无法获取过期时间，使用配置的默认过期天数
+                        vo.setExpirationDays(tempFlashCardExpirationDays);
+                    }
+                    
+                    return vo;
+                })
                 .sorted((a, b) -> {
-                     // 简单按 title 排序或者其它逻辑，因为 UserFlashCardVO 可能没有 createTime
-                     // 如果 FlashCard 有 createTime 最好
-                     return 0;
+                    // 按创建时间倒序排序（如果有 createTime）
+                    // 这里暂时保持原样，如果 FlashCardVO 有 createTime 字段可以改进
+                    return 0;
                 })
                 .collect(Collectors.toList());
+
+        // 清理已过期的 key（从 Set 中移除）
+        if (!expiredKeys.isEmpty()) {
+            redisTemplate.opsForSet().remove(userTempSetKey, expiredKeys.toArray());
+            log.debug("已清理 {} 个过期的临时闪卡 key：userId={}", expiredKeys.size(), userId);
+        }
+
+        return result;
     }
 
     @Override
@@ -379,38 +428,99 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
     @Override
     public boolean updateFlashCard(Long userId, FlashCardUpdateRequest request) {
         ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
-        ThrowUtils.throwIf(request.getId() == null, ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(request.getId()), ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
 
-        FlashCard flashCard = this.getById(request.getId());
+        String flashCardId = request.getId(); // request.getId() is now String
+
+        // 使用QueryWrapper查询，确保类型转换正确（数据库是bigint，实体类是String）
+        QueryWrapper<FlashCard> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("id", flashCardId);
+        queryWrapper.eq("userId", userId);
+        FlashCard flashCard = this.getOne(queryWrapper);
         ThrowUtils.throwIf(flashCard == null, ErrorCode.NOT_FOUND_ERROR, "闪卡不存在");
-        ThrowUtils.throwIf(!flashCard.getUserId().equals(userId), ErrorCode.FORBIDDEN_ERROR, "无权限修改");
 
+        // 保存更新前的值，用于Neo4j同步
+        String oldTitle = flashCard.getTitle();
+        String oldContent = flashCard.getContent();
+        String newTitle = oldTitle;
+        String newContent = oldContent;
+
+        // 更新字段
         if (StringUtils.isNotBlank(request.getTitle())) {
             flashCard.setTitle(request.getTitle());
+            newTitle = request.getTitle();
         }
         if (StringUtils.isNotBlank(request.getContent())) {
             flashCard.setContent(request.getContent());
+            newContent = request.getContent();
         }
         if (StringUtils.isNotBlank(request.getHtmlContent())) {
             flashCard.setHtmlContent(request.getHtmlContent());
         }
 
-        return this.updateById(flashCard);
+        // 先更新MySQL
+        boolean updated = this.updateById(flashCard);
+        if (updated) {
+            // MySQL更新成功后，同步更新Neo4j
+            try {
+                // 只有当title或content发生变化时才更新Neo4j
+                if (!oldTitle.equals(newTitle) || !oldContent.equals(newContent)) {
+                    neo4jFlashCardService.updateFlashCardInNeo4j(userId, request.getId(), newTitle, newContent);
+                    log.info("闪卡 {} 已成功在 MySQL 和 Neo4j 中同步更新", request.getId());
+                } else {
+                    log.debug("闪卡 {} 的 title 和 content 未变化，跳过 Neo4j 更新", request.getId());
+                }
+            } catch (Exception e) {
+                log.error("在 Neo4j 中更新闪卡失败：userId={}, flashCardId={}, error={}", userId, request.getId(), e.getMessage(), e);
+                // Neo4j 更新失败不影响主流程，但记录错误日志
+                // 注意：这里可以考虑添加重试机制或告警通知
+            }
+        } else {
+            log.warn("MySQL 更新闪卡失败：userId={}, flashCardId={}", userId, request.getId());
+        }
+        return updated;
     }
 
     @Override
     public boolean deleteFlashCard(Long userId, String flashCardId) {
-        FlashCard flashCard = this.getById(flashCardId);
+        // 数据库中的闪卡ID是Long类型，前端传过来的是String，需要转换
+        Long flashCardLongId;
+        try {
+            flashCardLongId = Long.parseLong(flashCardId);
+        } catch (NumberFormatException e) {
+            // 如果不是有效的Long类型ID，可能是一个错误的ID或者其他问题
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "闪卡ID格式不正确");
+        }
+
+        // 使用QueryWrapper查询，确保类型转换正确（数据库是bigint，实体类是String）
+        QueryWrapper<FlashCard> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("id", String.valueOf(flashCardLongId));
+        queryWrapper.eq("userId", userId);
+        FlashCard flashCard = this.getOne(queryWrapper);
         if (flashCard == null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "闪卡不存在");
         }
-        if (!flashCard.getUserId().equals(userId)) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+        
+        // 先删除MySQL中的数据（removeById也需要String类型）
+        boolean removed = this.removeById(String.valueOf(flashCardLongId));
+        if (removed) {
+            // MySQL删除成功后，同步删除Neo4j中的数据
+            try {
+                neo4jFlashCardService.deleteFlashCardFromNeo4j(userId, flashCardId);
+                log.info("闪卡 {} 已成功从 MySQL 和 Neo4j 中同步删除", flashCardId);
+            } catch (Exception e) {
+                log.error("从 Neo4j 删除闪卡失败：userId={}, flashCardId={}, error={}", userId, flashCardId, e.getMessage(), e);
+                // Neo4j 删除失败不影响主流程，但记录错误日志
+                // 注意：这里可以考虑添加重试机制或告警通知
+            }
+        } else {
+            log.warn("MySQL 删除闪卡失败：userId={}, flashCardId={}", userId, flashCardId);
         }
-        return this.removeById(flashCardId);
+        return removed;
     }
 
 
+    @Override
     public boolean deleteTempFlashCard(Long userId, String tempFlashCardId) {
          // 验证所有权
          FlashCard flashCard = (FlashCard) redisTemplate.opsForValue().get(tempFlashCardId);
@@ -433,19 +543,53 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
     @Override
     public boolean reviewFlashCard(Long userId, FlashCardReviewRequest request) {
         ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
-        ThrowUtils.throwIf(request.getId() == null, ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(request.getId()), ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
         ThrowUtils.throwIf(request.getDifficultyLevel() == null || 
                 request.getDifficultyLevel() < 1 || request.getDifficultyLevel() > 4,
                 ErrorCode.PARAMS_ERROR, "难度等级必须在1-4之间");
 
-        FlashCard flashCard = this.getById(request.getId());
+        // 使用QueryWrapper查询，确保类型转换正确（数据库是bigint，实体类是String）
+        QueryWrapper<FlashCard> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("id", request.getId());
+        queryWrapper.eq("userId", userId);
+        FlashCard flashCard = this.getOne(queryWrapper);
         ThrowUtils.throwIf(flashCard == null, ErrorCode.NOT_FOUND_ERROR, "闪卡不存在");
-        ThrowUtils.throwIf(!flashCard.getUserId().equals(userId), ErrorCode.FORBIDDEN_ERROR, "无权限操作");
 
+        // 根据难度等级映射到 SM2Algorithm.Grade
+        Grade grade;
+        switch (request.getDifficultyLevel()) {
+            case 1:
+                grade = Grade.FAILED; // 重来 (0分)
+                break;
+            case 2:
+                grade = Grade.HARD; // 困难 (1分)
+                break;
+            case 3:
+                grade = Grade.NORMAL; // 良好 (3分)
+                break;
+            case 4:
+                grade = Grade.EASY; // 简单 (4分)
+            default:
+                grade = Grade.FAILED; // 默认失败
+                break;
+        }
+
+        // 获取当前闪卡的 SM-2 算法相关参数，如果为 null 则初始化
+        int currentRepetition = flashCard.getRepetition() == null ? 0 : flashCard.getRepetition();
+        double currentEf = flashCard.getEf() == null ? SM2Algorithm.INITIAL_EF : flashCard.getEf();
+        int currentInterval = flashCard.getInterval() == null ? 0 : flashCard.getInterval();
+        Date lastReviewTime = flashCard.getLastReviewTime() == null ? new Date() : flashCard.getLastReviewTime();
+
+        // 调用 SM-2 算法计算新的复习参数
+        SM2Result sm2Result = SM2Algorithm.calculate(grade, currentRepetition, currentEf, currentInterval, lastReviewTime);
+
+        // 更新闪卡信息
         flashCard.setDifficultyLevel(request.getDifficultyLevel());
-        flashCard.setReviewCount(flashCard.getReviewCount() + 1);
-        flashCard.setLastReviewTime(new Date());
-        flashCard.setNextReviewTime(calculateNextReviewTime(request.getDifficultyLevel(), flashCard.getReviewCount()));
+        flashCard.setRepetition(sm2Result.getRepetition());
+        flashCard.setEf(sm2Result.getEf());
+        flashCard.setInterval(sm2Result.getInterval());
+        flashCard.setLastReviewTime(new Date()); // 本次复习时间
+        flashCard.setNextReviewTime(sm2Result.getNextReviewTime()); // 下次复习时间
 
         return this.updateById(flashCard);
     }
@@ -453,12 +597,15 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
     @Override
     public FlashCardVO aiAssistFlashCard(Long userId, FlashCardAIAssistRequest request) {
         ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
-        ThrowUtils.throwIf(request.getId() == null, ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(request.getId()), ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
         ThrowUtils.throwIf(StringUtils.isBlank(request.getPrompt()), ErrorCode.PARAMS_ERROR, "提示词不能为空");
 
-        FlashCard flashCard = this.getById(request.getId());
+        // 使用QueryWrapper查询，确保类型转换正确（数据库是bigint，实体类是String）
+        QueryWrapper<FlashCard> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("id", request.getId());
+        queryWrapper.eq("userId", userId);
+        FlashCard flashCard = this.getOne(queryWrapper);
         ThrowUtils.throwIf(flashCard == null, ErrorCode.NOT_FOUND_ERROR, "闪卡不存在");
-        ThrowUtils.throwIf(!flashCard.getUserId().equals(userId), ErrorCode.FORBIDDEN_ERROR, "无权限操作");
 
         try {
             String prompt = String.format(AI_ASSIST_PROMPT_TEMPLATE,
@@ -481,7 +628,21 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
             flashCard.setContent(jsonNode.path("content").asText(flashCard.getContent()));
             flashCard.setHtmlContent(jsonNode.path("htmlContent").asText(flashCard.getHtmlContent()));
 
-            this.updateById(flashCard);
+            // 更新MySQL
+            boolean updated = this.updateById(flashCard);
+
+            if (updated) {
+                try {
+                    // 同步更新Neo4j
+                    neo4jFlashCardService.updateFlashCardInNeo4j(userId, flashCard.getId(), flashCard.getTitle(), flashCard.getContent());
+                    log.info("AI辅助修改闪卡 {} 已成功在 MySQL 和 Neo4j 中同步更新", flashCard.getId());
+                } catch (Exception e) {
+                    log.error("AI辅助修改后，Neo4j 更新闪卡失败：userId={}, flashCardId={}, error={}", userId, request.getId(), e.getMessage(), e);
+                    // Neo4j 更新失败不影响主流程，但记录错误日志
+                }
+            } else {
+                log.warn("AI辅助修改后，MySQL 更新闪卡失败：userId={}, flashCardId={}", userId, request.getId());
+            }
             return getFlashCardVO(flashCard);
         } catch (Exception e) {
             log.error("AI辅助修改闪卡失败：userId={}, flashCardId={}, error={}", userId, request.getId(), e.getMessage(), e);
@@ -625,38 +786,13 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         }
     }
 
-    /**
-     * 根据艾宾浩斯曲线计算下次复习时间
-     * 难度等级：1-重来（30秒），2-困难（6分钟），3-良好（10分钟），4-简单（4天）
-     */
-    private Date calculateNextReviewTime(int difficultyLevel, int reviewCount) {
-        // reviewCount currently unused but kept for future advanced algorithms (SM-2 etc)
-        Calendar calendar = Calendar.getInstance();
-        
-        switch (difficultyLevel) {
-            case 1:
-                calendar.add(Calendar.SECOND, 30);
-                break;
-            case 2:
-                calendar.add(Calendar.MINUTE, 6);
-                break;
-            case 3:
-                calendar.add(Calendar.MINUTE, 10);
-                break;
-            case 4:
-                calendar.add(Calendar.DAY_OF_MONTH, 4);
-                break;
-            default:
-                calendar.add(Calendar.MINUTE, 1);
-        }
 
-        return calendar.getTime();
-    }
 
     @Override
-    public boolean confirmFlashCard(Long userId, String flashCardId) {
+    public boolean confirmFlashCard(Long userId, String flashCardId, String hierarchyPath) {
         ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
         ThrowUtils.throwIf(StringUtils.isBlank(flashCardId), ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(hierarchyPath), ErrorCode.PARAMS_ERROR, "层级标签路径不能为空");
 
         // 从 Redis 获取临时闪卡
         FlashCard tempFlashCard = (FlashCard) redisTemplate.opsForValue().get(flashCardId);
@@ -667,9 +803,18 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         ThrowUtils.throwIf("生成中...".equals(tempFlashCard.getTitle()), ErrorCode.OPERATION_ERROR, "闪卡仍在生成中，请稍后再试");
         ThrowUtils.throwIf("生成失败".equals(tempFlashCard.getTitle()), ErrorCode.OPERATION_ERROR, "闪卡生成失败，无法保存");
 
+        // 在保存到主库之前，确保用户的 Neo4j 数据库存在（如果不存在则创建）
+        try {
+            neo4jFlashCardService.ensureUserDatabaseExists(userId);
+            log.debug("用户 Neo4j 数据库检查完成：userId={}", userId);
+        } catch (Exception e) {
+            log.error("确保用户 Neo4j 数据库存在失败：userId={}, error={}", userId, e.getMessage(), e);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Neo4j 数据库准备失败，无法保存闪卡: " + e.getMessage());
+        }
+
         // 保存到数据库
-        // 注意：FlashCard 实体的主键策略是 ASSIGN_ID，所以这里如果 id 是 temp_ 开头的，应该置空让 MP 重新生成，
-        // 或者如果想保留某些关联，需要手动处理。通常存入 DB 时生成正式 ID。
+        // FlashCard 实体的主键策略是 ASSIGN_ID，因为 id 是 temp_ 开头的，置空让 MP 重新生成，
+        // 存入 DB 时生成正式 ID
         // 为了避免 ID 冲突和格式问题，我们创建一个新对象
         FlashCard newFlashCard = new FlashCard();
         BeanUtils.copyProperties(tempFlashCard, newFlashCard); // Fix variable name from flashCard to tempFlashCard
@@ -682,6 +827,27 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
              throw new BusinessException(ErrorCode.SYSTEM_ERROR, "保存到数据库失败");
         }
 
+        // 保存到 Neo4j
+        try {
+            neo4jFlashCardService.saveFlashCardToNeo4j(
+                userId, 
+                hierarchyPath, 
+                newFlashCard.getTitle(), 
+                newFlashCard.getContent(), 
+                newFlashCard.getId()
+            );
+
+            // TODO: 邮件通知-Neo4j保存成功
+            // eventPublisher.publishEvent();
+        } catch (Exception e) {
+            log.error("保存闪卡到 Neo4j 失败：userId={}, flashCardId={}, hierarchyPath={}, error={}", 
+                userId, newFlashCard.getId(), hierarchyPath, e.getMessage(), e);
+            // Neo4j 保存失败不影响主流程，但记录错误日志
+            // TODO: 邮件通知-Neo4j保存失败
+            // eventPublisher.publishEvent();
+            // TODO: 回滚数据库操作
+        }
+
         // 删除 Redis 中的临时数据
         redisTemplate.delete(flashCardId);
         // 从用户的临时闪卡集合中移除
@@ -691,6 +857,21 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         flashCardProgressManager.removeProgress(flashCardId);
 
         return true;
+    }
+
+    @Override
+    public void deleteFlashCardHierarchy(Long userId, String hierarchyPath) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(hierarchyPath), ErrorCode.PARAMS_ERROR, "层级标签路径不能为空");
+
+        try {
+            neo4jFlashCardService.deleteFlashCardHierarchyFromNeo4j(userId, hierarchyPath);
+            log.info("用户 {} 的闪卡层级 {} 已成功从 Neo4j 删除", userId, hierarchyPath);
+        } catch (Exception e) {
+            log.error("从 Neo4j 删除闪卡层级失败：userId={}, hierarchyPath={}, error={}",
+                userId, hierarchyPath, e.getMessage(), e);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "删除闪卡层级失败");
+        }
     }
 
     @Override
@@ -720,9 +901,12 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         }
 
         // 如果 Redis 中没有，或者不是临时闪卡，则尝试从数据库获取
+        // 验证是否为有效的数字ID（数据库中的ID是bigint，但实体类使用String类型）
         try {
-            Long flashCardLongId = Long.parseLong(flashCardId);
-            return this.getById(flashCardLongId);
+            // 验证ID是否为数字格式（用于数据库查询）
+            Long.parseLong(flashCardId);
+            // FlashCard的id字段是String类型，直接使用String类型的ID
+            return this.getById(flashCardId);
         } catch (NumberFormatException e) {
             // 如果不是有效的Long类型ID，则说明不是数据库中的闪卡，也不是Redis中的临时闪卡
             return null;

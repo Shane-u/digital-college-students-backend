@@ -138,6 +138,7 @@
             margin-bottom: 12px;
             display: -webkit-box;
             -webkit-line-clamp: 1;
+            line-clamp: 1;
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
@@ -149,6 +150,7 @@
             margin-bottom: 16px;
             display: -webkit-box;
             -webkit-line-clamp: 3;
+            line-clamp: 3;
             -webkit-box-orient: vertical;
             overflow: hidden;
             flex-grow: 1;
@@ -196,7 +198,6 @@
 
         /* 模态框 (Arco Style) */
         .modal {
-            display: none;
             position: fixed;
             top: 0;
             left: 0;
@@ -208,6 +209,14 @@
             justify-content: center;
             align-items: center;
             animation: fadeIn 0.2s ease-out;
+        }
+
+        .modal:not(.active) {
+            display: none;
+        }
+
+        .modal.active {
+            display: flex;
         }
 
         .modal-content {
@@ -350,6 +359,27 @@
                 <div class="form-actions">
                     <button type="button" class="btn-secondary" onclick="closeEditModal()">取消</button>
                     <button type="submit" class="btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 确认保存模态框 -->
+    <div id="confirmSaveModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">确认保存闪卡</h2>
+                <button class="close-btn" onclick="closeConfirmSaveModal()" >&times;</button>
+            </div>
+            <form id="confirmSaveForm">
+                <input type="hidden" id="confirmSaveCardId">
+                <div class="form-group">
+                    <label class="form-label">层级标签路径 (例如: root/课程/HTML)</label>
+                    <input type="text" id="hierarchyPathInput" class="form-input" placeholder="请输入层级路径" required>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeConfirmSaveModal()">取消</button>
+                    <button type="submit" class="btn-primary">确认保存</button>
                 </div>
             </form>
         </div>
@@ -544,14 +574,14 @@
             }
 
             container.innerHTML = flashCards.map(card => `
-                <div class="flash-card" onclick="openCard('${card.id}')">
+                <div class="flash-card">
                     <div>
                         <div class="flash-card-title">${escapeHtml(card.title || '未命名')}</div>
                         <div class="flash-card-content">${escapeHtml(card.content || '').substring(0, 100)}${card.content && card.content.length > 100 ? '...' : ''}</div>
                     </div>
                     <div>
                         <div class="review-info">
-                            复习: ${card.reviewCount || 0} 次 | 
+                            复习: ${card.repetition || 0} 次 | 
                             下次: ${card.nextReviewTime ? new Date(card.nextReviewTime).toLocaleString('zh-CN') : '未设置'}
                         </div>
                         <div class="flash-card-actions" onclick="event.stopPropagation()">
@@ -577,6 +607,8 @@
                 const isGenerating = progress && progress.status !== 'COMPLETED' && progress.status !== 'FAILED';
                 const isFailed = progress && progress.status === 'FAILED';
                 const isSuccess = progress && progress.status === 'COMPLETED';
+                const expirationInfo = card.expirationDays && card.expirationDays > 0 ? 
+                    `<span style="margin-left: 10px; color: var(--text-description);">还有 ${card.expirationDays} 天过期</span>` : '';
 
                 let cardContent = ``;
                 let actions = ``;
@@ -606,14 +638,14 @@
                     cardContent = `
                         <div class="flash-card-header">
                             <div>
-                                <div class="flash-card-title">${escapeHtml(card.title || '未命名')}</div>
+                                <div class="flash-card-title">${escapeHtml(card.title || '未命名')} ${expirationInfo}</div>
                                 <div class="flash-card-content">${escapeHtml(card.content || '').substring(0, 100)}${card.content && card.content.length > 100 ? '...' : ''}</div>
                             </div>
                         </div>
                     `;
                     actions = `
                         <div class="flash-card-actions" onclick="event.stopPropagation()">
-                            <button class="action-btn btn-primary-confirm" onclick="confirmSaveFlashCard('${card.id}')">确认保存</button>
+                            <button class="action-btn btn-primary-confirm" onclick="openConfirmSaveModal('${card.id}')">确认保存</button>
                             <button class="action-btn" onclick="openTempCardHtml('${card.id}')">预览</button>
                             <button class="action-btn btn-delete" onclick="deleteTempCard('${card.id}')">删除</button>
                         </div>
@@ -621,7 +653,7 @@
                 }
 
                 return `
-                    <div class="flash-card" ${!isGenerating && !isFailed ? `onclick="openTempCard('${card.id}')"` : ''}>
+                    <div class="flash-card">
                         ${cardContent}
                         ${actions}
                     </div>
@@ -713,10 +745,22 @@
             }
         }
 
-        function editCard(cardId) {
-            const card = flashCards.find(c => c.id === cardId);
-            if (!card) return;
+        // 存储当前编辑的闪卡ID（用于在提交时使用原始ID）
+        let currentEditCardId = null;
 
+        function editCard(cardId) {
+            // 将cardId转换为字符串，以便与card.id进行比较（card.id可能是数字或字符串）
+            const cardIdStr = String(cardId);
+            // 使用宽松比较或字符串比较，因为card.id可能是数字类型（从JSON反序列化）
+            const card = flashCards.find(c => String(c.id) === cardIdStr);
+            if (!card) {
+                console.error('找不到闪卡，cardId:', cardId, 'cardIdStr:', cardIdStr, 'flashCards:', flashCards);
+                showError('找不到要编辑的闪卡');
+                return;
+            }
+
+            // 保存原始ID（可能是数字或字符串，但保持原样）
+            currentEditCardId = card.id;
             document.getElementById('editCardId').value = card.id;
             document.getElementById('editTitle').value = card.title || '';
             document.getElementById('editContent').value = card.content || '';
@@ -727,14 +771,23 @@
         function closeEditModal() {
             document.getElementById('editModal').classList.remove('active');
             document.getElementById('editForm').reset();
+            currentEditCardId = null;
         }
 
         document.getElementById('editForm').onsubmit = async (e) => {
             e.preventDefault();
-            const cardId = document.getElementById('editCardId').value;
+            // 使用保存的原始ID，确保类型正确（现在后端接受String类型）
+            const cardId = currentEditCardId !== null ? currentEditCardId : document.getElementById('editCardId').value;
             const title = document.getElementById('editTitle').value;
             const content = document.getElementById('editContent').value;
             const htmlContent = document.getElementById('editHtmlContent').value;
+
+            // 确保ID是字符串类型（后端现在接受String类型）
+            const cardIdStr = String(cardId);
+            if (!cardIdStr || cardIdStr.trim() === '') {
+                showError('闪卡ID格式不正确');
+                return;
+            }
 
             try {
                 const response = await fetch(`${API_BASE}/update`, {
@@ -744,7 +797,7 @@
                     },
                     credentials: 'include', // 包含cookie，用于认证
                     body: JSON.stringify({
-                        id: parseInt(cardId),
+                        id: cardIdStr,
                         title: title,
                         content: content,
                         htmlContent: htmlContent
@@ -780,6 +833,13 @@
             const cardId = document.getElementById('aiCardId').value;
             const prompt = document.getElementById('aiPrompt').value;
 
+            // 确保ID是字符串类型（后端现在接受String类型）
+            const cardIdStr = String(cardId);
+            if (!cardIdStr || cardIdStr.trim() === '') {
+                showError('闪卡ID格式不正确');
+                return;
+            }
+
             try {
                 const response = await fetch(`${API_BASE}/ai-assist`, {
                     method: 'POST',
@@ -788,7 +848,7 @@
                     },
                     credentials: 'include', // 包含cookie，用于认证
                     body: JSON.stringify({
-                        id: parseInt(cardId),
+                        id: cardIdStr,
                         prompt: prompt
                     })
                 });
@@ -835,8 +895,9 @@
             }
         }
 
-        async function confirmSaveFlashCard(flashCardId) {
-            if (!confirm('确定要保存这个闪卡到终库吗？')) return;
+        async function confirmSaveFlashCard(flashCardId, hierarchyPath, btn) {
+            if (btn) btn.disabled = true; // 禁用按钮防止重复点击
+
             try {
                 const response = await fetch(`${API_BASE}/confirm`, {
                     method: 'POST',
@@ -844,22 +905,44 @@
                         'Content-Type': 'application/json'
                     },
                     credentials: 'include',
-                    body: JSON.stringify({ id: flashCardId })
+                    body: JSON.stringify({ id: flashCardId, hierarchyPath: hierarchyPath })
                 });
 
                 const result = await response.json();
 
                 if (result.code === 0) {
                     showNotification('闪卡已成功保存！', 'success');
+                    closeConfirmSaveModal();
                     loadAllFlashCards();
                 } else {
                     showError('保存失败: ' + result.message);
+                    if (btn) btn.disabled = false; // 重新启用按钮
                 }
             } catch (error) {
                 console.error('保存失败:', error);
                 showError('保存失败: ' + error.message);
+                if (btn) btn.disabled = false; // 重新启用按钮
             }
         }
+
+        function openConfirmSaveModal(flashCardId) {
+            document.getElementById('confirmSaveCardId').value = flashCardId;
+            document.getElementById('hierarchyPathInput').value = ''; // 清空输入框
+            document.getElementById('confirmSaveModal').classList.add('active');
+        }
+
+        function closeConfirmSaveModal() {
+            document.getElementById('confirmSaveModal').classList.remove('active');
+            document.getElementById('confirmSaveForm').reset();
+        }
+
+        document.getElementById('confirmSaveForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const cardId = document.getElementById('confirmSaveCardId').value;
+            const hierarchyPath = document.getElementById('hierarchyPathInput').value;
+            const submitBtn = document.querySelector('#confirmSaveForm .btn-primary');
+            await confirmSaveFlashCard(cardId, hierarchyPath, submitBtn);
+        };
 
         async function deleteTempCard(flashCardId) {
             if (!confirm('确定要删除这个临时闪卡吗？')) return;
@@ -947,6 +1030,13 @@
             const card = reviewCards[currentReviewIndex];
             if (!card) return;
 
+            // 确保ID是字符串类型（后端现在接受String类型）
+            const cardIdStr = String(card.id);
+            if (!cardIdStr || cardIdStr.trim() === '') {
+                showError('闪卡ID格式不正确');
+                return;
+            }
+
             try {
                 const response = await fetch(`${API_BASE}/review`, {
                     method: 'POST',
@@ -955,7 +1045,7 @@
                     },
                     credentials: 'include', // 包含cookie，用于认证
                     body: JSON.stringify({
-                        id: card.id,
+                        id: cardIdStr,
                         difficultyLevel: difficultyLevel
                     })
                 });

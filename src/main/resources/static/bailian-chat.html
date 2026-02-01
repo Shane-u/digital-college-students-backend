@@ -402,6 +402,142 @@
             color: rgba(255, 255, 255, 0.8);
         }
 
+        .message.system {
+            justify-content: center;
+        }
+
+        .message.system .message-content {
+            background: #e3f2fd;
+            color: #1976d2;
+            font-size: 13px;
+            padding: 10px 16px;
+            border-radius: 20px;
+            max-width: 90%;
+        }
+
+        /* 模态框 (Arco Style) - 新增样式 */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(29, 33, 41, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        .modal:not(.active) {
+            display: none;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            width: 600px;
+            max-width: 90%;
+            max-height: 85vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 4px 32px rgba(0, 0, 0, 0.15);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e5e6eb;
+        }
+
+        .modal-title { font-size: 18px; font-weight: 600; }
+
+        .form-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #e5e6eb;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: all 0.2s;
+            background: #f2f3f5;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #3370ff;
+            background: white;
+            box-shadow: 0 0 0 2px rgba(51, 112, 255, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 14px;
+            color: #4e5969;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+        }
+
+        .btn-secondary {
+            background: #e5e6eb;
+            color: #4e5969;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-secondary:hover {
+            background: #d9d9d9;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #86909c;
+            transition: color 0.2s;
+        }
+
+        .close-btn:hover {
+            color: #4e5969;
+        }
+
         .input-area {
             padding: 20px 24px;
             background: white;
@@ -603,6 +739,27 @@
                 <div class="empty-state-icon">💭</div>
                 <div class="empty-state-text">暂无会话<br>点击"新建会话"开始聊天</div>
             </div>
+        </div>
+    </div>
+
+    <!-- 确认保存模态框 -->
+    <div id="confirmSaveModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">确认保存闪卡</h2>
+                <button class="close-btn" onclick="closeConfirmSaveModal()" >&times;</button>
+            </div>
+            <form id="confirmSaveForm">
+                <input type="hidden" id="confirmSaveCardId">
+                <div class="form-group">
+                    <label class="form-label">层级标签路径 (例如: root/课程/HTML)</label>
+                    <input type="text" id="hierarchyPathInput" class="form-input" placeholder="请输入层级路径" required>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="closeConfirmSaveModal()">取消</button>
+                    <button type="submit" class="btn-primary">确认保存</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -861,10 +1018,10 @@
                 addSystemMessage('✅ 闪卡生成完成！点击"查看闪卡"按钮查看。');
                 
                 if ('Notification' in window && Notification.permission === 'granted') {
-                    new Notification('闪卡生成完成', {
-                        body: '您的闪卡已生成完成，点击查看',
-                        icon: '/favicon.ico'
-                    });
+                                new Notification('闪卡生成完成', {
+                                    body: `您的闪卡已生成完成，点击查看`,
+                                    icon: '/favicon.ico'
+                                });
                 }
                 
                 // 清除轮询定时器
@@ -1600,15 +1757,41 @@
             contentDiv.className = 'message-content';
             contentDiv.innerHTML = `
                 <p>闪卡已生成成功，是否要保存到终库？</p>
-                <button class="flash-card-btn" onclick="confirmSaveFlashCard('${flashCardId}', this)">确认保存</button>
+                <button class="flash-card-btn" onclick="openConfirmSaveModal('${flashCardId}', this)">确认保存</button>
             `;
             messageDiv.appendChild(contentDiv);
             chatArea.appendChild(messageDiv);
             scrollToBottom();
         }
 
-        async function confirmSaveFlashCard(flashCardId, btn) {
-            if (btn) btn.disabled = true;
+        function openConfirmSaveModal(flashCardId, button) {
+            document.getElementById('confirmSaveCardId').value = flashCardId;
+            document.getElementById('hierarchyPathInput').value = ''; // 清空输入框
+            // 保存按钮引用，以便在模态框提交后禁用它
+            window.currentConfirmSaveButton = button;
+            document.getElementById('confirmSaveModal').classList.add('active');
+        }
+
+        function closeConfirmSaveModal() {
+            document.getElementById('confirmSaveModal').classList.remove('active');
+            document.getElementById('confirmSaveForm').reset();
+            // 清除按钮引用
+            window.currentConfirmSaveButton = null;
+        }
+
+        document.getElementById('confirmSaveForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const cardId = document.getElementById('confirmSaveCardId').value;
+            const hierarchyPath = document.getElementById('hierarchyPathInput').value;
+            const submitBtn = window.currentConfirmSaveButton; // 使用保存的按钮引用
+            await confirmSaveFlashCard(cardId, hierarchyPath, submitBtn);
+        };
+
+        async function confirmSaveFlashCard(flashCardId, hierarchyPath, btn) {
+            if (btn) btn.disabled = true; // 禁用按钮防止重复点击
+            if (btn) btn.textContent = '保存中...'; // 更新按钮文本
+            addSystemMessage('正在保存闪卡到终库...', false);
+
             try {
                 const response = await fetch(`${FLASH_CARD_API_BASE}/confirm`, {
                     method: 'POST',
@@ -1616,7 +1799,7 @@
                         'Content-Type': 'application/json'
                     },
                     credentials: 'include',
-                    body: JSON.stringify({ id: flashCardId })
+                    body: JSON.stringify({ id: flashCardId, hierarchyPath: hierarchyPath })
                 });
 
                 const result = await response.json();
@@ -1624,14 +1807,21 @@
                 if (result.code === 0) {
                     addSystemMessage('✅ 闪卡已成功保存到终库！', false);
                     if (btn) btn.remove(); // 移除按钮
+                    closeConfirmSaveModal();
                 } else {
                     addSystemMessage(`保存闪卡失败: ${result.message}`, true);
-                    if (btn) btn.disabled = false;
+                    if (btn) {
+                        btn.disabled = false; // 重新启用按钮
+                        btn.textContent = '确认保存'; // 恢复按钮文本
+                    }
                 }
             } catch (error) {
                 console.error('保存闪卡失败:', error);
                 addSystemMessage(`保存闪卡失败: ${error.message}`, true);
-                if (btn) btn.disabled = false;
+                if (btn) {
+                    btn.disabled = false; // 重新启用按钮
+                    btn.textContent = '确认保存'; // 恢复按钮文本
+                }
             }
         }
 

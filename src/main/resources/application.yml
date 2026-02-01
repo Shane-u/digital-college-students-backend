@@ -220,13 +220,15 @@ huggingface:
     api-key: ${HF_ASR_API_KEY}
     model: ${HF_ASR_MODEL}
 
-# 语音/对话控制前端 Agent
-web-agent:
-  # 临时：先转发到 realtime-demo 的 HTTP 接口，下发 WebRTC DataChannel 指令
-  relay-url: http://localhost:3001/send
-  # 指令生成模式：rule=规则（推荐先跑通）；llm=硅基流动生成（后续切换）
-  mode: rule
-
 flashcard:
   temp:
     expiration-days: 7 # 临时闪卡在Redis中的过期时间，单位：天
+
+# Neo4j 配置
+neo4j:
+  uri: bolt://${NEO4J_HOST:localhost}:7687
+  username: ${NEO4J_USERNAME:neo4j}
+  password: ${NEO4J_PASSWORD:}
+  # 数据库名（可选）：如果不配置或为空，将自动使用 userId 作为数据库名
+  # 如果配置了值，则所有用户都使用该数据库
+  database: ${NEO4J_DATABASE:}

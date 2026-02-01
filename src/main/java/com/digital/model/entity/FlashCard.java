@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
-import java.io.Serializable;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.Date;
 import lombok.Data;
 
@@ -16,7 +16,8 @@ import lombok.Data;
  */
 @TableName(value = "flash_card")
 @Data
-public class FlashCard implements Serializable {
+@JsonIgnoreProperties(ignoreUnknown = true) // 忽略Redis序列化时未知字段的警告
+public class FlashCard {
 
     /**
      * 闪卡id
@@ -57,12 +58,25 @@ public class FlashCard implements Serializable {
     /**
      * 复习次数
      */
-    private Integer reviewCount;
+    private Integer repetition;
 
     /**
      * 最后复习时间
      */
     private Date lastReviewTime;
+
+    /**
+     * 易忘系数（Easiness Factor），SM-2算法核心参数
+     * 初始值为2.5
+     */
+    private Double ef;
+
+    /**
+     * 复习间隔（天），SM-2算法核心参数
+     * 初次复习为0
+     */
+    @TableField("`interval`") // 解决MySQL关键字冲突
+    private Integer interval;
 
     /**
      * 难度等级（1-重来，2-困难，3-良好，4-简单）

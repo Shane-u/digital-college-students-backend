@@ -196,3 +196,13 @@ create table if not exists flash_card
     index idx_reviewCount (reviewCount),
     index idx_createTime (createTime)
 ) comment '记忆闪卡表' collate = utf8mb4_unicode_ci;
+
+
+-- Rename 'reviewCount' to 'repetition'
+ALTER TABLE flash_card CHANGE COLUMN reviewCount repetition INT DEFAULT 0;
+
+-- Add 'ef' column
+ALTER TABLE flash_card ADD COLUMN ef DOUBLE DEFAULT 2.5;
+
+-- Add 'interval' column (Note the backticks for 'interval')
+ALTER TABLE flash_card ADD COLUMN `interval` INT DEFAULT 0;

@@ -6,6 +6,7 @@ import com.digital.common.ErrorCode;
 import com.digital.common.ResultUtils;
 import com.digital.exception.BusinessException;
 import com.digital.model.dto.flashcard.FlashCardAIAssistRequest;
+import com.digital.model.dto.flashcard.FlashCardConfirmRequest;
 import com.digital.model.dto.flashcard.FlashCardGenerateRequest;
 import com.digital.model.dto.flashcard.FlashCardReviewRequest;
 import com.digital.model.dto.flashcard.FlashCardUpdateRequest;
@@ -13,7 +14,9 @@ import com.digital.model.entity.User;
 import com.digital.model.vo.FlashCardVO;
 import com.digital.model.vo.FlashCardProgressVO; // 新增导入
 import com.digital.manager.FlashCardProgressManager; // 新增导入
+import com.digital.model.dto.flashcard.DeleteHierarchyRequest; // 新增导入
 import com.digital.service.FlashCardService;
+import com.digital.service.Neo4jFlashCardService;
 import com.digital.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -43,6 +46,9 @@ public class FlashCardController {
 
     @Resource
     private FlashCardProgressManager flashCardProgressManager; // 新增
+
+    @Resource
+    private Neo4jFlashCardService neo4jFlashCardService;
 
     /**
      * 生成闪卡（异步）
@@ -180,18 +186,21 @@ public class FlashCardController {
 
     /**
      * 确认保存闪卡到终库
-     * @param request 包含临时闪卡ID的请求体
+     * @param request 包含临时闪卡ID和层级标签路径的请求体
      * @param httpServletRequest HttpServletRequest
      * @return 确认结果
      */
     @PostMapping("/confirm")
-    public BaseResponse<Boolean> confirmFlashCard(@RequestBody com.digital.common.DeleteRequest request,
+    public BaseResponse<Boolean> confirmFlashCard(@RequestBody FlashCardConfirmRequest request,
                                                   HttpServletRequest httpServletRequest) {
         if (request == null || StringUtils.isBlank(request.getId())) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
         }
+        if (StringUtils.isBlank(request.getHierarchyPath())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "层级标签路径不能为空");
+        }
         User loginUser = userService.getLoginUser(httpServletRequest);
-        return ResultUtils.success(flashCardService.confirmFlashCard(loginUser.getId(), request.getId()));
+        return ResultUtils.success(flashCardService.confirmFlashCard(loginUser.getId(), request.getId(), request.getHierarchyPath()));
     }
 
     /**
@@ -242,5 +251,23 @@ public class FlashCardController {
     public BaseResponse<FlashCardVO> getTempFlashCardPathVariable(@org.springframework.web.bind.annotation.PathVariable("id") String tempFlashCardId,
                                                       HttpServletRequest httpServletRequest) {
         return getTempFlashCard(tempFlashCardId, httpServletRequest);
+    }
+
+    /**
+     * 删除指定闪卡层级及其所有关联内容
+     *
+     * @param request 包含层级路径的请求体
+     * @param httpServletRequest HttpServletRequest
+     * @return 删除结果
+     */
+    @PostMapping("/delete-hierarchy")
+    public BaseResponse<Boolean> deleteFlashCardHierarchy(@RequestBody com.digital.model.dto.flashcard.DeleteHierarchyRequest request,
+                                                          HttpServletRequest httpServletRequest) {
+        if (request == null || StringUtils.isBlank(request.getHierarchyPath())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "层级标签路径不能为空");
+        }
+        User loginUser = userService.getLoginUser(httpServletRequest);
+        flashCardService.deleteFlashCardHierarchy(loginUser.getId(), request.getHierarchyPath());
+        return ResultUtils.success(true);
     }
 }

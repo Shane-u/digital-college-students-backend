@@ -72,6 +72,11 @@ public class FlashCardVO implements Serializable {
      */
     private Date updateTime;
 
+    /**
+     * 过期天数（仅用于临时闪卡，表示还有多少天过期）
+     */
+    private Long expirationDays;
+
     private static final long serialVersionUID = 1L;
 }
 
