@@ -89,7 +89,7 @@ public class FlashCardController {
     @PostMapping("/update")
     public BaseResponse<Boolean> updateFlashCard(@RequestBody FlashCardUpdateRequest request,
                                                   HttpServletRequest httpServletRequest) {
-        if (request == null || request.getId() == null) {
+        if (request == null || StringUtils.isBlank(request.getId())) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
 
@@ -117,7 +117,7 @@ public class FlashCardController {
     @PostMapping("/review")
     public BaseResponse<Boolean> reviewFlashCard(@RequestBody FlashCardReviewRequest request,
                                                   HttpServletRequest httpServletRequest) {
-        if (request == null || request.getId() == null || request.getDifficultyLevel() == null) {
+        if (request == null || StringUtils.isBlank(request.getId()) || request.getDifficultyLevel() == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
 
@@ -131,7 +131,7 @@ public class FlashCardController {
     @PostMapping("/ai-assist")
     public BaseResponse<FlashCardVO> aiAssistFlashCard(@RequestBody FlashCardAIAssistRequest request,
                                                         HttpServletRequest httpServletRequest) {
-        if (request == null || request.getId() == null || StringUtils.isBlank(request.getPrompt())) {
+        if (request == null || StringUtils.isBlank(request.getId()) || StringUtils.isBlank(request.getPrompt())) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
 
