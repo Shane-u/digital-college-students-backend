@@ -39,6 +39,6 @@ public class SiliconflowTest {
 
         // 解析AI返回的JSON
         String responseContent = response.getContent();
-
+        System.out.println(responseContent);
     }
 }
