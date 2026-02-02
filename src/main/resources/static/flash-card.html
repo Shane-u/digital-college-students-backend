@@ -647,6 +647,7 @@
                         <div class="flash-card-actions" onclick="event.stopPropagation()">
                             <button class="action-btn btn-primary-confirm" onclick="openConfirmSaveModal('${card.id}')">确认保存</button>
                             <button class="action-btn" onclick="openTempCardHtml('${card.id}')">预览</button>
+                            <button class="action-btn btn-edit" onclick="editTempCard('${card.id}')">编辑</button>
                             <button class="action-btn btn-delete" onclick="deleteTempCard('${card.id}')">删除</button>
                         </div>
                     `;
@@ -747,6 +748,7 @@
 
         // 存储当前编辑的闪卡ID（用于在提交时使用原始ID）
         let currentEditCardId = null;
+        let isTempCardEditing = false; // 新增变量，标记是否正在编辑临时闪卡
 
         function editCard(cardId) {
             // 将cardId转换为字符串，以便与card.id进行比较（card.id可能是数字或字符串）
@@ -761,6 +763,7 @@
 
             // 保存原始ID（可能是数字或字符串，但保持原样）
             currentEditCardId = card.id;
+            isTempCardEditing = false; // 标记为非临时闪卡编辑
             document.getElementById('editCardId').value = card.id;
             document.getElementById('editTitle').value = card.title || '';
             document.getElementById('editContent').value = card.content || '';
@@ -768,10 +771,38 @@
             document.getElementById('editModal').classList.add('active');
         }
 
+        async function editTempCard(cardId) {
+            try {
+                const response = await fetch(`${API_BASE}/temp/${cardId}`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include'
+                });
+                const result = await response.json();
+
+                if (result.code === 0 && result.data) {
+                    const card = result.data;
+                    currentEditCardId = card.id;
+                    isTempCardEditing = true; // 标记为临时闪卡编辑
+                    document.getElementById('editCardId').value = card.id;
+                    document.getElementById('editTitle').value = card.title || '';
+                    document.getElementById('editContent').value = card.content || '';
+                    document.getElementById('editHtmlContent').value = card.htmlContent || '';
+                    document.getElementById('editModal').classList.add('active');
+                } else {
+                    showError('加载临时闪卡失败: ' + result.message);
+                }
+            } catch (error) {
+                console.error('加载临时闪卡失败:', error);
+                showError('加载临时闪卡失败: ' + error.message);
+            }
+        }
+
         function closeEditModal() {
             document.getElementById('editModal').classList.remove('active');
             document.getElementById('editForm').reset();
             currentEditCardId = null;
+            isTempCardEditing = false; // 重置标记
         }
 
         document.getElementById('editForm').onsubmit = async (e) => {
@@ -789,8 +820,10 @@
                 return;
             }
 
+            const apiUrl = isTempCardEditing ? `${API_BASE}/temp/update` : `${API_BASE}/update`;
+
             try {
-                const response = await fetch(`${API_BASE}/update`, {
+                const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -808,7 +841,7 @@
                 
                 if (result.code === 0) {
                     closeEditModal();
-                    loadFlashCards();
+                    loadAllFlashCards(); // 重新加载所有闪卡以更新UI
                 } else {
                     showError('保存失败: ' + result.message);
                 }

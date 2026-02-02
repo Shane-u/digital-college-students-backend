@@ -80,6 +80,12 @@ public interface FlashCardService extends IService<FlashCard> {
      */
     void removeTempFlashCard(String flashCardId);
 
+
+    /**
+     * 更新临时闪卡
+     */
+    boolean updateTempFlashCard(Long userId, FlashCardUpdateRequest request);
+
     /**
      * 删除闪卡层级及其所有关联内容
      *

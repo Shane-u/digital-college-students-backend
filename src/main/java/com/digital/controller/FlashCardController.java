@@ -220,6 +220,19 @@ public class FlashCardController {
     }
 
     /**
+     * 更新暂存闪卡
+     */
+    @PostMapping("/temp/update")
+    public BaseResponse<Boolean> updateTempFlashCard(@RequestBody FlashCardUpdateRequest request,
+                                                     HttpServletRequest httpServletRequest) {
+        if (request == null || StringUtils.isBlank(request.getId())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+        }
+        User loginUser = userService.getLoginUser(httpServletRequest);
+        return ResultUtils.success(flashCardService.updateTempFlashCard(loginUser.getId(), request));
+    }
+
+    /**
      * 查看临时闪卡详情（用于预览）
      *
      * @param tempFlashCardId 临时闪卡ID

@@ -541,6 +541,36 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
     }
 
     @Override
+    public boolean updateTempFlashCard(Long userId, FlashCardUpdateRequest request) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(request.getId()), ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+
+        String flashCardId = request.getId();
+
+        // 从 Redis 获取临时闪卡
+        FlashCard flashCard = (FlashCard) redisTemplate.opsForValue().get(flashCardId);
+        ThrowUtils.throwIf(flashCard == null, ErrorCode.NOT_FOUND_ERROR, "临时闪卡不存在或已过期");
+        ThrowUtils.throwIf(!flashCard.getUserId().equals(userId), ErrorCode.FORBIDDEN_ERROR, "无权限修改该闪卡");
+
+        // 更新字段
+        if (StringUtils.isNotBlank(request.getTitle())) {
+            flashCard.setTitle(request.getTitle());
+        }
+        if (StringUtils.isNotBlank(request.getContent())) {
+            flashCard.setContent(request.getContent());
+        }
+        if (StringUtils.isNotBlank(request.getHtmlContent())) {
+            flashCard.setHtmlContent(request.getHtmlContent());
+        }
+
+        // 更新 Redis 中的临时闪卡，并刷新过期时间
+        redisTemplate.opsForValue().set(flashCardId, flashCard, tempFlashCardExpirationDays, TimeUnit.DAYS);
+        log.info("临时闪卡 {} 已成功更新并刷新过期时间", flashCardId);
+
+        return true;
+    }
+
+    @Override
     public boolean reviewFlashCard(Long userId, FlashCardReviewRequest request) {
         ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
         ThrowUtils.throwIf(StringUtils.isBlank(request.getId()), ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
