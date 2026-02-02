@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Neo4j 闪卡服务
@@ -117,7 +119,7 @@ public class Neo4jFlashCardService {
      * 根据层级标签创建层级结构，并将闪卡节点添加到对应层级
      *
      * @param userId 用户ID
-     * @param hierarchyPath 层级路径，如 "root/课程/HTML" 或 "root/课程/前端/HTML"
+     * @param hierarchyPath 层级路径，如 "根/课程/HTML" 或 "根/课程/前端/HTML"
      * @param flashCardTitle 闪卡标题
      * @param flashCardContent 闪卡内容
      * @param flashCardId 闪卡ID（用于关联）
@@ -136,12 +138,12 @@ public class Neo4jFlashCardService {
                 .toArray(String[]::new);
         
         if (levels.length < 2 || levels.length > 4) {
-            throw new IllegalArgumentException("层级路径必须是2-4级，格式：root/课程/HTML 或 root/课程/前端/HTML");
+            throw new IllegalArgumentException("层级路径必须是2-4级，格式：根/课程/HTML 或 根/课程/前端/HTML");
         }
 
-        // 验证第一级必须是 "root"
-        if (!"root".equals(levels[0])) {
-            throw new IllegalArgumentException("层级路径的第一级必须是 'root'");
+        // 验证第一级必须是 "根"
+        if (!"根".equals(levels[0])) {
+            throw new IllegalArgumentException("层级路径的第一级必须是 '根'");
         }
 
         // 使用 userId 作为数据库名，如果配置了默认数据库则使用默认值
@@ -234,7 +236,7 @@ public class Neo4jFlashCardService {
      * 从 Neo4j 删除指定层级路径上的节点及其所有关联的子节点和关系。
      *
      * @param userId 用户ID
-     * @param hierarchyPath 层级路径，如 "root/课程/HTML"
+     * @param hierarchyPath 层级路径，如 "根/课程/HTML"
      */
     /**
      * 更新 Neo4j 中的闪卡节点
@@ -284,8 +286,8 @@ public class Neo4jFlashCardService {
             throw new IllegalArgumentException("层级路径至少包含一个层级");
         }
 
-        if (!"root".equals(levels[0])) {
-            throw new IllegalArgumentException("层级路径的第一级必须是 'root'");
+        if (!"根".equals(levels[0])) {
+            throw new IllegalArgumentException("层级路径的第一级必须是 '根'");
         }
 
         // 构建 MATCH 子句来精确匹配目标节点
@@ -304,7 +306,7 @@ public class Neo4jFlashCardService {
                              "DETACH DELETE " + targetNodeVariable + ", descendant";
 
         // 准备参数
-        java.util.Map<String, Object> parameters = new java.util.HashMap<>();
+        Map<String, Object> parameters = new HashMap<>();
         parameters.put("userId", userId);
         for (int i = 0; i < levels.length; i++) {
             parameters.put("name" + i, levels[i]);

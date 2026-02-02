@@ -70,7 +70,7 @@ public interface FlashCardService extends IService<FlashCard> {
      * 确认保存闪卡到终库
      * @param userId 用户ID
      * @param flashCardId 临时闪卡ID
-     * @param hierarchyPath 层级标签路径，如 "root/课程/HTML" 或 "root/课程/前端/HTML"
+     * @param hierarchyPath 层级标签路径，如 "根/课程/HTML" 或 "根/课程/前端/HTML"
      * @return 是否保存成功
      */
     boolean confirmFlashCard(Long userId, String flashCardId, String hierarchyPath);
@@ -90,7 +90,7 @@ public interface FlashCardService extends IService<FlashCard> {
      * 删除闪卡层级及其所有关联内容
      *
      * @param userId 用户ID
-     * @param hierarchyPath 层级路径，如 "root/课程/HTML"
+     * @param hierarchyPath 层级路径，如 "根/课程/HTML"
      */
     void deleteFlashCardHierarchy(Long userId, String hierarchyPath);
 

@@ -11,7 +11,7 @@ import java.io.Serializable;
 public class DeleteHierarchyRequest implements Serializable {
 
     /**
-     * 层级路径，如 "root/课程/HTML"
+     * 层级路径，如 "根/课程/HTML"
      */
     private String hierarchyPath;
 
