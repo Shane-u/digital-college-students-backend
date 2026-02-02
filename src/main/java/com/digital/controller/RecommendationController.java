@@ -47,7 +47,7 @@ public class RecommendationController {
             @RequestParam(required = false) String context,
             HttpServletRequest request) {
         try {
-            // 从session获取用户id（需要根据实际项目调整）
+            // 从session获取用户id
             Long userId = getUserIdFromRequest(request);
             if (userId == null) {
                 return ResultUtils.error(401, "用户未登录");

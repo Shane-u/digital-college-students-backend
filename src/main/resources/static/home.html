@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能推荐平台</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Quicksand:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root{
+            --bg:#f7faff;
+            --card:#ffffff;
+            --primary:#ff9aa2;
+            --secondary:#c7ceff;
+            --text:#333;
+            --text-sub:#666;
+            --border:#e6ecf5;
+            --shadow:rgba(0,0,0,0.05);
+        }
+
+        body{
+            margin:0;
+            font-family:'Quicksand','Inter',sans-serif;
+            background:linear-gradient(180deg,#f0f6ff,#ffffff);
+            color:var(--text);
+        }
+
+        header{
+            background:white;
+            box-shadow:0 2px 10px var(--shadow);
+            position:sticky;
+            top:0;
+            z-index:100;
+        }
+
+        header .container{
+            max-width:1200px;
+            margin:auto;
+            padding:15px 20px;
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+        }
+
+        h1{
+            font-size:22px;
+            color:#ff758f;
+        }
+
+        nav ul{
+            list-style:none;
+            display:flex;
+            gap:20px;
+        }
+
+        nav a{
+            text-decoration:none;
+            color:var(--text-sub);
+            font-weight:600;
+        }
+
+        nav a:hover{
+            color:#ff758f;
+        }
+
+        main{
+            max-width:1200px;
+            margin:auto;
+            padding:30px 20px;
+        }
+
+        section h2{
+            text-align:center;
+            font-size:26px;
+            color:#ff758f;
+        }
+
+        .card-grid{
+            display:grid;
+            grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+            gap:20px;
+        }
+
+        .card{
+            background:white;
+            border-radius:16px;
+            padding:18px;
+            box-shadow:0 4px 12px var(--shadow);
+            transition:.3s;
+        }
+
+        .card:hover{
+            transform:translateY(-5px);
+        }
+
+        .card img{
+            width:100%;
+            height:160px;
+            object-fit:cover;
+            border-radius:12px;
+            margin-bottom:10px;
+            background:#f2f4ff;
+        }
+
+        .card h3{
+            margin:5px 0;
+        }
+
+        .tag{
+            background:#f0f3ff;
+            padding:4px 8px;
+            border-radius:8px;
+            font-size:12px;
+        }
+
+        .detail{
+            font-size:13px;
+            color:var(--text-sub);
+            margin:6px 0;
+        }
+
+        .card-actions{
+            display:flex;
+            gap:6px;
+            flex-wrap:wrap;
+            margin-top:10px;
+        }
+
+        button{
+            background:#f7faff;
+            border:1px solid var(--border);
+            padding:6px 10px;
+            border-radius:8px;
+            cursor:pointer;
+        }
+
+        button:hover{
+            background:#ffe8eb;
+        }
+
+        .form-section{
+            background:white;
+            border-radius:16px;
+            padding:20px;
+            margin-top:30px;
+            box-shadow:0 4px 12px var(--shadow);
+        }
+
+        .message.success{color:#4caf50;}
+        .message.error{color:#f44336;}
+    </style>
+</head>
+
+<body>
+<header>
+    <div class="container">
+        <h1>🎀 智能大学生推荐平台</h1>
+        <nav>
+            <ul>
+                <li><a href="#contest-recommendations">竞赛推荐</a></li>
+                <li><a href="#job-recommendations">职业推荐</a></li>
+                <li><a href="#record-behavior">记录行为</a></li>
+                <li><a href="#refresh-cache">刷新缓存</a></li>
+            </ul>
+        </nav>
+    </div>
+</header>
+
+<main>
+    <section id="contest-recommendations">
+        <h2>🌸 竞赛推荐</h2>
+        <div class="card-grid" id="contest-list"><p>加载中...</p></div>
+    </section>
+
+    <section id="job-recommendations">
+        <h2>💼 职业推荐</h2>
+        <div class="card-grid" id="job-list"><p>加载中...</p></div>
+    </section>
+
+    <!-- 你的表单部分保持不变，只是外观优化 -->
+    <section id="record-behavior" class="form-section">
+        <h2>📝 记录用户行为</h2>
+        <form id="behavior-form">
+            <div class="form-group">
+                <label>物品类型</label>
+                <select id="behavior-item-type">
+                    <option value="CONTEST">竞赛</option>
+                    <option value="JOB">职业</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>物品ID</label>
+                <input type="number" id="behavior-item-id" required>
+            </div>
+            <div class="form-group">
+                <label>行为类型</label>
+                <select id="behavior-type">
+                    <option value="VIEW">浏览</option>
+                    <option value="CLICK">点击</option>
+                    <option value="COLLECT">收藏</option>
+                    <option value="APPLY">报名/申请</option>
+                    <option value="SHARE">分享</option>
+                </select>
+            </div>
+            <button type="submit">记录行为</button>
+        </form>
+        <div id="behavior-message" class="message" style="display:none;"></div>
+    </section>
+
+    <section id="refresh-cache" class="form-section">
+        <h2>🔄 刷新推荐缓存</h2>
+        <form id="refresh-form">
+            <select id="refresh-item-type">
+                <option value="CONTEST">竞赛</option>
+                <option value="JOB">职业</option>
+            </select>
+            <button type="submit">刷新</button>
+        </form>
+        <div id="refresh-message" class="message" style="display:none;"></div>
+    </section>
+</main>
+
+<script>
+    function displayMessage(id,msg,type){
+        const el=document.getElementById(id);
+        el.textContent=msg;
+        el.className='message '+type;
+        el.style.display='block';
+    }
+
+    // ====== 竞赛渲染（展示 itemDetail）======
+    async function fetchContestRecommendations(){
+        const box=document.getElementById('contest-list');
+        box.innerHTML='<p>加载中...</p>';
+        try{
+            const res=await fetch('/api/recommendation/contest');
+            const data=await res.json();
+
+            if(data.code===0){
+                box.innerHTML='';
+                data.data.forEach(c=>{
+                    const d=c.itemDetail;
+                    const card=`
+     <div class="card">
+      ${d.thumbPic?`<img src="${d.thumbPic}">`:""}
+      <h3>${c.itemName}</h3>
+      <div class="detail">📍 级别：${d.levelName}</div>
+      <div class="detail">👥 主办方：${d.organiser}</div>
+      <div class="detail">🌏 范围：${d.enterRange}</div>
+      <div class="detail">⏰ 状态：${d.timeName}</div>
+      <div class="detail">🎯 推荐理由：${c.reason}</div>
+      <div class="detail">⭐ 相关度：${c.score.toFixed(3)}</div>
+      <div class="card-actions">
+        <button onclick="recordBehavior('CONTEST',${c.itemId},'CLICK')">点击</button>
+        <button onclick="recordBehavior('CONTEST',${c.itemId},'VIEW')">浏览</button>
+        <button onclick="recordBehavior('CONTEST',${c.itemId},'COLLECT')">收藏</button>
+      </div>
+     </div>`;
+                    box.innerHTML+=card;
+                });
+            }
+        }catch(e){box.innerHTML='加载失败';}
+    }
+
+    // ====== 职位渲染（展示 itemDetail）======
+    async function fetchJobRecommendations(){
+        const box=document.getElementById('job-list');
+        box.innerHTML='<p>加载中...</p>';
+        try{
+            const res=await fetch('/api/recommendation/job');
+            const data=await res.json();
+
+            if(data.code===0){
+                box.innerHTML='';
+                data.data.forEach(j=>{
+                    const d=j.itemDetail;
+                    const card=`
+     <div class="card">
+      <h3>${j.itemName}</h3>
+      <div class="detail">💰 薪资：${d.workSalary}</div>
+      <div class="detail">📍 城市：${d.workAddress}</div>
+      <div class="detail">🎓 学历：${d.graduate||'不限'}</div>
+      <div class="detail">🏢 公司：${d.companyName}</div>
+      <div class="detail">🧾 职责：${d.workContent.slice(0,120)}...</div>
+      <div class="detail">⭐ 相关度：${j.score.toFixed(3)}</div>
+      <div class="card-actions">
+        <button onclick="recordBehavior('JOB',${j.itemId},'CLICK')">点击</button>
+        <button onclick="recordBehavior('JOB',${j.itemId},'VIEW')">浏览</button>
+        <button onclick="recordBehavior('JOB',${j.itemId},'COLLECT')">收藏</button>
+      </div>
+     </div>`;
+                    box.innerHTML+=card;
+                });
+            }
+        }catch(e){box.innerHTML='加载失败';}
+    }
+
+    // ====== 你的行为记录接口（完全保留）======
+    window.recordBehavior = async (itemType,itemId,behaviorType,context='')=>{
+        try{
+            const r=await fetch('/api/recommendation/behavior',{
+                method:'POST',
+                headers:{'Content-Type':'application/x-www-form-urlencoded'},
+                body:new URLSearchParams({itemType,itemId,behaviorType,context})
+            });
+            const d=await r.json();
+            d.code===0?
+                displayMessage('behavior-message','记录成功','success'):
+                displayMessage('behavior-message','记录失败','error');
+        }catch(e){
+            displayMessage('behavior-message','请求异常','error');
+        }
+    };
+
+    // ====== 刷新缓存（逻辑不变）======
+    document.getElementById('refresh-form').addEventListener('submit',async e=>{
+        e.preventDefault();
+        const type=document.getElementById('refresh-item-type').value;
+        const r=await fetch('/api/recommendation/refresh',{
+            method:'POST',
+            headers:{'Content-Type':'application/x-www-form-urlencoded'},
+            body:new URLSearchParams({itemType:type})
+        });
+        const d=await r.json();
+        d.code===0?displayMessage('refresh-message','刷新成功','success')
+            :displayMessage('refresh-message','刷新失败','error');
+        if(type==='CONTEST')fetchContestRecommendations();
+        else fetchJobRecommendations();
+    });
+
+    fetchContestRecommendations();
+    fetchJobRecommendations();
+</script>
+</body>
+</html>

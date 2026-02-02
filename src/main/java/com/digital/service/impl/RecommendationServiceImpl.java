@@ -74,7 +74,7 @@ public class RecommendationServiceImpl extends ServiceImpl<UserBehaviorMapper, U
     private static final String USER_PROFILE_CACHE_PREFIX = "user_profile:";
     
     // 推荐结果缓存时间（小时）
-    private static final int RECOMMENDATION_CACHE_HOURS = 24;
+    private static final int RECOMMENDATION_CACHE_HOURS = 1;
     
     // 默认推荐数量
     private static final int DEFAULT_RECOMMENDATION_LIMIT = 10;
@@ -101,7 +101,7 @@ public class RecommendationServiceImpl extends ServiceImpl<UserBehaviorMapper, U
             // 保存行为记录
             this.save(behavior);
 
-            // 清除用户画像缓存 (如果需要)
+            // 清除用户画像缓存
             String userProfileCacheKey = USER_PROFILE_CACHE_PREFIX + userId + ":" + itemType;
             redisTemplate.delete(userProfileCacheKey);
 

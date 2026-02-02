@@ -13,7 +13,7 @@ import java.io.IOException;
  * 数据导出接口（用于Python训练）
  */
 @RestController
-@RequestMapping("/data-export") // Adjusted RequestMapping
+@RequestMapping("/data-export")
 @Slf4j
 public class DataExportController {
 
