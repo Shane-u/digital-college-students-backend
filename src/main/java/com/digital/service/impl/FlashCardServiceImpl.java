@@ -491,13 +491,20 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
 
         // MySQL 更新成功后，同步更新 Neo4j
         try {
-            // 1. 如果标题或内容发生变化，同步内容到 Neo4j
-            if (!oldTitle.equals(newTitle) || !oldContent.equals(newContent)) {
-                neo4jFlashCardService.updateFlashCardInNeo4j(userId, request.getId(), newTitle, newContent);
-                log.info("闪卡 {} 内容已在 MySQL 和 Neo4j 中同步更新", request.getId());
-            } else {
-                log.debug("闪卡 {} 的 title 和 content 未变化，跳过 Neo4j 内容更新", request.getId());
-            }
+            // 1. 同步内容及元数据到 Neo4j（无论是否变化，保证字段完整且 htmlContent 被清理）
+            neo4jFlashCardService.updateFlashCardInNeo4j(
+                    userId,
+                    request.getId(),
+                    newTitle,
+                    newContent,
+                    flashCard.getHierarchyPath(),
+                    flashCard.getNextReviewTime() == null ? null : flashCard.getNextReviewTime().getTime(),
+                    flashCard.getRepetition(),
+                    flashCard.getDifficultyLevel(),
+                    flashCard.getCreateTime() == null ? null : flashCard.getCreateTime().getTime(),
+                    flashCard.getUpdateTime() == null ? null : flashCard.getUpdateTime().getTime()
+            );
+            log.info("闪卡 {} 内容及元数据已在 MySQL 和 Neo4j 中同步更新", request.getId());
 
             // 2. 如果层级路径发生变化，则更新 Neo4j 中的层级结构
             String normalizedOldPath = StringUtils.isBlank(oldHierarchyPath) ? null : normalizeHierarchyPath(oldHierarchyPath);
@@ -511,7 +518,13 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
                         normalizedNewPath,
                         flashCardId,
                         newTitle,
-                        newContent
+                        newContent,
+                        flashCard.getHierarchyPath(),
+                        flashCard.getNextReviewTime() == null ? null : flashCard.getNextReviewTime().getTime(),
+                        flashCard.getRepetition(),
+                        flashCard.getDifficultyLevel(),
+                        flashCard.getCreateTime() == null ? null : flashCard.getCreateTime().getTime(),
+                        flashCard.getUpdateTime() == null ? null : flashCard.getUpdateTime().getTime()
                 );
                 log.info("闪卡 {} 的层级路径已在 Neo4j 中更新：oldPath={}, newPath={}",
                         flashCardId, normalizedOldPath, normalizedNewPath);
@@ -646,6 +659,7 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
                 break;
             case 4:
                 grade = Grade.EASY; // 简单 (4分)
+                break;
             default:
                 grade = Grade.FAILED; // 默认失败
                 break;
@@ -665,10 +679,34 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         flashCard.setRepetition(sm2Result.getRepetition());
         flashCard.setEf(sm2Result.getEf());
         flashCard.setInterval(sm2Result.getInterval());
-        flashCard.setLastReviewTime(new Date()); // 本次复习时间
+        Date now = new Date();
+        flashCard.setLastReviewTime(now); // 本次复习时间
         flashCard.setNextReviewTime(sm2Result.getNextReviewTime()); // 下次复习时间
 
-        return this.updateById(flashCard);
+        boolean updated = this.updateById(flashCard);
+
+        // 同步复习相关信息到 Neo4j（如果存在对应节点）
+        if (updated) {
+            try {
+                neo4jFlashCardService.updateFlashCardInNeo4j(
+                        userId,
+                        flashCard.getId(),
+                        flashCard.getTitle(),
+                        flashCard.getContent(),
+                        flashCard.getHierarchyPath(),
+                        flashCard.getNextReviewTime() == null ? null : flashCard.getNextReviewTime().getTime(),
+                        flashCard.getRepetition(),
+                        flashCard.getDifficultyLevel(),
+                        flashCard.getCreateTime() == null ? null : flashCard.getCreateTime().getTime(),
+                        flashCard.getUpdateTime() == null ? null : flashCard.getUpdateTime().getTime()
+                );
+            } catch (Exception e) {
+                log.error("复习闪卡后同步 Neo4j 失败：userId={}, flashCardId={}, error={}",
+                        userId, flashCard.getId(), e.getMessage(), e);
+            }
+        }
+
+        return updated;
     }
 
     @Override
@@ -710,8 +748,19 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
 
             if (updated) {
                 try {
-                    // 同步更新Neo4j
-                    neo4jFlashCardService.updateFlashCardInNeo4j(userId, flashCard.getId(), flashCard.getTitle(), flashCard.getContent());
+                    // 同步更新Neo4j（包含内容、层级路径、复习信息和时间字段；不再存储 HTML）
+                    neo4jFlashCardService.updateFlashCardInNeo4j(
+                            userId,
+                            flashCard.getId(),
+                            flashCard.getTitle(),
+                            flashCard.getContent(),
+                            flashCard.getHierarchyPath(),
+                            flashCard.getNextReviewTime() == null ? null : flashCard.getNextReviewTime().getTime(),
+                            flashCard.getRepetition(),
+                            flashCard.getDifficultyLevel(),
+                            flashCard.getCreateTime() == null ? null : flashCard.getCreateTime().getTime(),
+                            flashCard.getUpdateTime() == null ? null : flashCard.getUpdateTime().getTime()
+                    );
                     log.info("AI辅助修改闪卡 {} 已成功在 MySQL 和 Neo4j 中同步更新", flashCard.getId());
                 } catch (Exception e) {
                     log.error("AI辅助修改后，Neo4j 更新闪卡失败：userId={}, flashCardId={}, error={}", userId, request.getId(), e.getMessage(), e);
@@ -734,6 +783,8 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         }
         FlashCardVO flashCardVO = new FlashCardVO();
         BeanUtils.copyProperties(flashCard, flashCardVO);
+        // 实体中使用 repetition 字段，VO 中是 reviewCount，这里手动映射，避免为 null
+        flashCardVO.setReviewCount(flashCard.getRepetition());
         return flashCardVO;
     }
 
@@ -909,22 +960,49 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         // 保存到 Neo4j
         try {
             neo4jFlashCardService.saveFlashCardToNeo4j(
-                userId, 
-                hierarchyPath, 
-                newFlashCard.getTitle(), 
-                newFlashCard.getContent(), 
+                userId,
+                hierarchyPath,
+                newFlashCard.getTitle(),
+                newFlashCard.getContent(),
+                newFlashCard.getHierarchyPath(),
+                newFlashCard.getNextReviewTime() == null ? null : newFlashCard.getNextReviewTime().getTime(),
+                newFlashCard.getRepetition(),
+                newFlashCard.getDifficultyLevel(),
+                newFlashCard.getCreateTime() == null ? null : newFlashCard.getCreateTime().getTime(),
+                newFlashCard.getUpdateTime() == null ? null : newFlashCard.getUpdateTime().getTime(),
                 newFlashCard.getId()
             );
 
-            // TODO: 邮件通知-Neo4j保存成功
-            // eventPublisher.publishEvent();
+            // 邮件通知 / 事件通知：Neo4j 保存成功（可由监听器发送邮件）
+            try {
+                eventPublisher.publishEvent(new FlashCardGeneratedEvent(
+                        this,
+                        newFlashCard.getId(),
+                        userId,
+                        "success"
+                ));
+            } catch (Exception eventEx) {
+                log.error("发布 Neo4j 保存成功事件时出错：userId={}, flashCardId={}, error={}",
+                        userId, newFlashCard.getId(), eventEx.getMessage(), eventEx);
+            }
         } catch (Exception e) {
-            log.error("保存闪卡到 Neo4j 失败：userId={}, flashCardId={}, hierarchyPath={}, error={}", 
+            log.error("保存闪卡到 Neo4j 失败：userId={}, flashCardId={}, hierarchyPath={}, error={}",
                 userId, newFlashCard.getId(), hierarchyPath, e.getMessage(), e);
             // Neo4j 保存失败不影响主流程，但记录错误日志
-            // TODO: 邮件通知-Neo4j保存失败
-            // eventPublisher.publishEvent();
-            // TODO: 回滚数据库操作
+            // 使用事件通知机制（例如发送邮件），标记为 failed
+            try {
+                eventPublisher.publishEvent(new FlashCardGeneratedEvent(
+                        this,
+                        newFlashCard.getId(),
+                        userId,
+                        "failed",
+                        "保存闪卡到 Neo4j 失败：" + e.getMessage()
+                ));
+            } catch (Exception eventEx) {
+                log.error("发布 Neo4j 保存失败事件时出错：userId={}, flashCardId={}, error={}",
+                        userId, newFlashCard.getId(), eventEx.getMessage(), eventEx);
+            }
+            // TODO: 如有需要可在此处回滚 MySQL 操作
         }
 
         // 删除 Redis 中的临时数据

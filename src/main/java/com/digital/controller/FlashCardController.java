@@ -14,7 +14,6 @@ import com.digital.model.entity.User;
 import com.digital.model.vo.FlashCardVO;
 import com.digital.model.vo.FlashCardProgressVO; // 新增导入
 import com.digital.manager.FlashCardProgressManager; // 新增导入
-import com.digital.model.dto.flashcard.DeleteHierarchyRequest; // 新增导入
 import com.digital.service.FlashCardService;
 import com.digital.service.Neo4jFlashCardService;
 import com.digital.service.UserService;
@@ -282,5 +281,39 @@ public class FlashCardController {
         User loginUser = userService.getLoginUser(httpServletRequest);
         flashCardService.deleteFlashCardHierarchy(loginUser.getId(), request.getHierarchyPath());
         return ResultUtils.success(true);
+    }
+
+    /**
+     * 在用户的 Neo4j 数据库中，根据关键词和类型搜索节点
+     *
+     * @param type    节点类型：ROOT / LEVEL / FLASHCARD / ALL
+     * @param keyword 关键词
+     */
+    @GetMapping("/neo4j/search")
+    public BaseResponse<java.util.List<java.util.Map<String, Object>>> searchNeo4jNodes(
+            @org.springframework.web.bind.annotation.RequestParam String type,
+            @org.springframework.web.bind.annotation.RequestParam String keyword,
+            HttpServletRequest httpServletRequest) {
+        User loginUser = userService.getLoginUser(httpServletRequest);
+        if (StringUtils.isBlank(keyword)) {
+            // 关键词为空直接返回空列表，避免全表扫描
+            return ResultUtils.success(java.util.List.of());
+        }
+        java.util.List<java.util.Map<String, Object>> result =
+                neo4jFlashCardService.searchNodes(loginUser.getId(), type, keyword);
+        return ResultUtils.success(result);
+    }
+
+    /**
+     * 按更新时间筛选图谱（返回节点 + 关系 + 层级结构）
+     *
+     * @param range 时间范围（支持：ALL/全部、近7天、近半个月、近1个月、近半年、近一年、一年前）
+     */
+    @GetMapping("/neo4j/graph-by-updated")
+    public BaseResponse<java.util.Map<String, Object>> getNeo4jGraphByUpdatedAt(
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String range,
+            HttpServletRequest httpServletRequest) {
+        User loginUser = userService.getLoginUser(httpServletRequest);
+        return ResultUtils.success(neo4jFlashCardService.getGraphByUpdatedAtRange(loginUser.getId(), range));
     }
 }

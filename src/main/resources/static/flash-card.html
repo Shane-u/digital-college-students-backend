@@ -312,6 +312,44 @@
             </div>
         </div>
 
+        <!-- Neo4j 节点搜索区域 -->
+        <div style="background: #fff; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 14px; color: var(--text-secondary); font-weight: 500;">Neo4j 节点搜索：</span>
+            <select id="neo4jSearchType" class="form-input" style="width: 140px; padding: 6px 8px;">
+                <option value="ALL">全部类型</option>
+                <option value="ROOT">根节点</option>
+                <option value="LEVEL">层级节点</option>
+                <option value="FLASHCARD">闪卡节点</option>
+            </select>
+            <input type="text" id="neo4jSearchKeyword" class="form-input" placeholder="输入关键词（名称或标题）" style="flex: 1; min-width: 160px;">
+            <button class="btn-primary" style="padding: 6px 14px; font-size: 13px;" onclick="searchNeo4jNodes()">搜索</button>
+        </div>
+
+        <!-- Neo4j 搜索结果展示区域 -->
+        <div id="neo4jSearchResults" style="background: #fff; border-radius: 12px; padding: 10px 16px; margin-bottom: 16px; border: 1px dashed var(--border-color); display: none;">
+            <div style="font-size: 13px; color: var(--text-description); margin-bottom: 8px;">搜索结果：</div>
+            <div id="neo4jSearchResultsList" style="font-size: 13px; color: var(--text-secondary); display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px;"></div>
+        </div>
+
+        <!-- 图谱筛选 & 树形展示区域 -->
+        <div style="background: #fff; border-radius: 12px; padding: 14px 16px; margin-bottom: 20px; border: 1px solid var(--border-color);">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+                <span style="font-size: 14px; color: var(--text-secondary); font-weight: 500;">图谱按更新时间筛选：</span>
+                <div id="graphFilterTabs" style="display: flex; gap: 4px; background: #f5f7fb; padding: 4px; border-radius: 999px;">
+                    <button class="mode-btn graph-tab active" data-range="ALL">全部</button>
+                    <button class="mode-btn graph-tab" data-range="近7天">近7天</button>
+                    <button class="mode-btn graph-tab" data-range="近半个月">近半月</button>
+                    <button class="mode-btn graph-tab" data-range="近1个月">近1个月</button>
+                    <button class="mode-btn graph-tab" data-range="近半年">近半年</button>
+                    <button class="mode-btn graph-tab" data-range="近一年">近一年</button>
+                    <button class="mode-btn graph-tab" data-range="一年前">一年前</button>
+                </div>
+            </div>
+            <div id="neo4jGraphTree" style="max-height: 320px; overflow: auto; padding: 8px 4px; font-size: 13px; color: var(--text-secondary);">
+                <div style="color: var(--text-description);">请选择上方时间范围加载图谱数据。</div>
+            </div>
+        </div>
+
         <!-- 列表模式 -->
         <div id="listMode" class="list-mode">
             <div id="confirmedFlashCardsSection">
@@ -585,7 +623,7 @@
                     </div>
                     <div>
                         <div class="review-info">
-                            复习: ${card.repetition || 0} 次 | 
+                            复习: ${card.reviewCount || 0} 次 | 
                             下次: ${card.nextReviewTime ? new Date(card.nextReviewTime).toLocaleString('zh-CN') : '未设置'}
                         </div>
                         <div class="flash-card-actions" onclick="event.stopPropagation()">
@@ -1115,6 +1153,223 @@
 
         function showError(message) {
             alert(message);
+        }
+
+        // ================== Neo4j 节点搜索 ==================
+
+        async function searchNeo4jNodes() {
+            const type = document.getElementById('neo4jSearchType').value;
+            const keyword = document.getElementById('neo4jSearchKeyword').value.trim();
+
+            if (!keyword) {
+                showError('请输入搜索关键词');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/neo4j/search?type=${encodeURIComponent(type)}&keyword=${encodeURIComponent(keyword)}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include'
+                });
+
+                const result = await response.json();
+
+                const container = document.getElementById('neo4jSearchResults');
+                const listContainer = document.getElementById('neo4jSearchResultsList');
+
+                if (result.code !== 0) {
+                    container.style.display = 'block';
+                    listContainer.innerHTML = `<div style="color: var(--danger-color);">搜索失败：${result.message}</div>`;
+                    return;
+                }
+
+                const data = result.data || [];
+                if (data.length === 0) {
+                    container.style.display = 'block';
+                    listContainer.innerHTML = '<div style="color: var(--text-description);">没有找到匹配的节点</div>';
+                    return;
+                }
+
+                container.style.display = 'block';
+                listContainer.innerHTML = data.map((item, index) => {
+                    const typeLabel = item.type === 'ROOT' ? '根节点'
+                        : item.type === 'LEVEL' ? '层级节点'
+                        : item.type === 'FLASHCARD' ? '闪卡'
+                        : (item.type || '未知');
+
+                    // 把所有字段（包括 id / name / title / content / userId 等）都展示出来，
+                    // 但不展示 htmlContent / originalContent 这类大字段。
+                    const rows = Object.entries(item).map(([key, value]) => {
+                        if (key === 'htmlContent' || key === 'originalContent') {
+                            return '';
+                        }
+
+                        let displayValue = (value === null || value === undefined) ? '' : value;
+
+                        // 时间字段（以 Time 结尾）如果是数字或数字字符串，则格式化成人类可读时间
+                        if (/Time$/i.test(key)) {
+                            let ts = null;
+                            if (typeof displayValue === 'number') {
+                                ts = displayValue;
+                            } else if (typeof displayValue === 'string' && /^\d+$/.test(displayValue)) {
+                                ts = Number(displayValue);
+                            }
+                            if (ts !== null) {
+                                const d = new Date(ts);
+                                if (!isNaN(d.getTime())) {
+                                    displayValue = d.toLocaleString('zh-CN');
+                                }
+                            }
+                        }
+
+                        const vStr = String(displayValue);
+                        return `<div><span style="color:#999;">${escapeHtml(key)}:</span> ${escapeHtml(vStr)}</div>`;
+                    }).filter(Boolean).join('');
+
+                    return `
+                        <div style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: #fafafa;">
+                            <div style="font-weight: 500; color: var(--text-main); margin-bottom: 4px;">[${typeLabel}]</div>
+                            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+                                ${rows}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('搜索 Neo4j 节点失败:', error);
+                showError('搜索 Neo4j 节点失败: ' + error.message);
+            }
+        }
+
+        // ================== 图谱按更新时间筛选 & 树形展示 ==================
+
+        // 绑定图谱时间筛选 tab 点击事件（事件委托）
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.graph-tab');
+            if (!btn) return;
+            const range = btn.getAttribute('data-range') || 'ALL';
+
+            document.querySelectorAll('.graph-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            loadNeo4jGraphTree(range);
+        });
+
+        async function loadNeo4jGraphTree(range) {
+            const container = document.getElementById('neo4jGraphTree');
+            container.innerHTML = '<div style="color: var(--text-description);">加载中...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/neo4j/graph-by-updated?range=${encodeURIComponent(range)}`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include'
+                });
+
+                const result = await response.json();
+                if (result.code !== 0) {
+                    container.innerHTML = `<div style="color: var(--danger-color);">加载图谱失败：${escapeHtml(result.message || '')}</div>`;
+                    return;
+                }
+
+                const data = result.data || {};
+                const nodes = data.nodes || [];
+
+                // 从节点中提取闪卡节点，使用 hierarchyPath 构建树
+                const flashcardNodes = nodes.filter(n => {
+                    const labels = n.labels || [];
+                    return labels.some(label => label.endsWith('_FlashCard'));
+                });
+
+                if (flashcardNodes.length === 0) {
+                    container.innerHTML = '<div style="color: var(--text-description);">当前时间范围内没有匹配的图谱数据。</div>';
+                    return;
+                }
+
+                const treeData = buildHierarchyTreeFromFlashcards(flashcardNodes);
+                container.innerHTML = renderHierarchyTreeHtml(treeData);
+            } catch (error) {
+                console.error('加载图谱失败:', error);
+                container.innerHTML = `<div style="color: var(--danger-color);">加载图谱失败：${escapeHtml(error.message || '')}</div>`;
+            }
+        }
+
+        // 根据闪卡节点的 hierarchyPath 构建树形结构
+        function buildHierarchyTreeFromFlashcards(flashcardNodes) {
+            const root = {}; // { segment: { __children: {}, __cards: [] } }
+
+            flashcardNodes.forEach(node => {
+                const path = (node.hierarchyPath || '').trim();
+                if (!path) return;
+
+                const normalized = path.replace(/^\/+|\/+$/g, '');
+                const segments = normalized.split('/').filter(Boolean);
+                if (segments.length === 0) return;
+
+                let cur = root;
+                segments.forEach((seg, idx) => {
+                    if (!cur[seg]) {
+                        cur[seg] = { __children: {}, __cards: [] };
+                    }
+                    if (idx === segments.length - 1) {
+                        // 叶子层挂载闪卡
+                        cur[seg].__cards.push({
+                            title: node.title || node.name || '未命名闪卡',
+                            updatedAt: node.updatedAt,
+                            id: node.id,
+                            content: node.content || ''
+                        });
+                    }
+                    cur = cur[seg].__children;
+                });
+            });
+
+            return root;
+        }
+
+        // 递归渲染树为 HTML
+        function renderHierarchyTreeHtml(tree) {
+            const renderLevel = (nodeMap) => {
+                const entries = Object.entries(nodeMap);
+                if (entries.length === 0) return '';
+
+                return `<ul style="list-style: none; padding-left: 16px; margin: 0;">${entries.map(([name, data]) => {
+                    const childrenHtml = renderLevel(data.__children || {});
+                    const cardsHtml = (data.__cards || []).map(card => {
+                        let updatedStr = '';
+                        if (card.updatedAt) {
+                            const ts = typeof card.updatedAt === 'number'
+                                ? card.updatedAt
+                                : (/^\d+$/.test(String(card.updatedAt)) ? Number(card.updatedAt) : null);
+                            if (ts) {
+                                const d = new Date(ts);
+                                if (!isNaN(d.getTime())) {
+                                    updatedStr = d.toLocaleString('zh-CN');
+                                }
+                            }
+                        }
+                        return `
+                            <li style="margin: 2px 0 2px 12px; padding-left: 8px; border-left: 1px dashed #e5e6eb;">
+                                <span style="color: #333;">📄 ${escapeHtml(card.title)}</span>
+                                ${updatedStr ? `<span style="color:#999; margin-left:6px;">更新: ${escapeHtml(updatedStr)}</span>` : ''}
+                            </li>
+                        `;
+                    }).join('');
+
+                    return `
+                        <li style="margin: 2px 0;">
+                            <div style="font-weight: 500; color: #4e5969;">${escapeHtml(name)}</div>
+                            ${cardsHtml ? `<ul style="list-style:none; padding-left: 12px; margin: 2px 0 0 0;">${cardsHtml}</ul>` : ''}
+                            ${childrenHtml}
+                        </li>
+                    `;
+                }).join('')}</ul>`;
+            };
+
+            return renderLevel(tree);
         }
 
         window.onload = function() {

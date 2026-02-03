@@ -5,6 +5,10 @@ import org.neo4j.driver.Session;
 import org.neo4j.driver.SessionConfig;
 import org.neo4j.driver.Transaction;
 import org.neo4j.driver.Values;
+import org.neo4j.driver.Record;
+import org.neo4j.driver.types.Path;
+import org.neo4j.driver.types.Node;
+import org.neo4j.driver.types.Relationship;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -13,6 +17,9 @@ import jakarta.annotation.Resource;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 
 /**
  * Neo4j 闪卡服务
@@ -118,14 +125,25 @@ public class Neo4jFlashCardService {
      * 保存闪卡到 Neo4j
      * 根据层级标签创建层级结构，并将闪卡节点添加到对应层级
      *
+     * 注意：为减小图数据体积，这里不在 Neo4j 中存储 htmlContent，只保留纯内容等关键字段。
+     *
      * @param userId 用户ID
      * @param hierarchyPath 层级路径，如 "根/课程/HTML" 或 "根/课程/前端/HTML"
      * @param flashCardTitle 闪卡标题
      * @param flashCardContent 闪卡内容
+     * @param hierarchyPathForCard 闪卡层级路径（冗余存储在卡片节点上，便于查询）
+     * @param nextReviewTimeMs 下次复习时间（毫秒时间戳，可为 null）
+     * @param repetition 复习次数
+     * @param difficultyLevel 难度等级
+     * @param createTimeMs 创建时间（毫秒时间戳）
+     * @param updatedAtMs 更新时间（毫秒时间戳）
      * @param flashCardId 闪卡ID（用于关联）
      */
-    public void saveFlashCardToNeo4j(Long userId, String hierarchyPath,
-                                     String flashCardTitle, String flashCardContent,
+    public void saveFlashCardToNeo4j(Long userId, String hierarchyPath, 
+                                     String flashCardTitle, String flashCardContent, 
+                                     String hierarchyPathForCard,
+                                     Long nextReviewTimeMs, Integer repetition, Integer difficultyLevel,
+                                     Long createTimeMs, Long updatedAtMs,
                                      String flashCardId) {
         if (hierarchyPath == null || hierarchyPath.trim().isEmpty()) {
             throw new IllegalArgumentException("层级路径不能为空");
@@ -190,19 +208,35 @@ public class Neo4jFlashCardService {
                 String flashCardLabel = "User_" + userId + "_FlashCard";
 
                 String createFlashCardQuery = "MATCH (level:" + lastLevelLabel + " {name: $levelName, userId: $userId}) " +
-                                             "MERGE (card:" + flashCardLabel + " {id: $flashCardId, title: $title, content: $content, userId: $userId}) " +
+                                             "MERGE (card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
+                                             "SET card.title = $title, " +
+                                             "    card.content = $content, " +
+                                             "    card.htmlContent = null, " +
+                                             "    card.hierarchyPath = $cardHierarchyPath, " +
+                                             "    card.nextReviewTime = $nextReviewTime, " +
+                                             "    card.repetition = $repetition, " +
+                                             "    card.difficultyLevel = $difficultyLevel, " +
+                                             "    card.createTime = $createTime, " +
+                                             "    card.updatedAt = $updatedAt " +
                                              "MERGE (level)-[:LINK_TO]->(card) RETURN card";
                 tx.run(createFlashCardQuery,
                     Values.parameters("levelName", lastLevelName, "userId", userId,
-                                    "flashCardId", flashCardId, "title", flashCardTitle,
-                                    "content", flashCardContent));
+                                    "flashCardId", flashCardId,
+                                    "title", flashCardTitle,
+                                    "content", flashCardContent,
+                                    "cardHierarchyPath", hierarchyPathForCard,
+                                    "nextReviewTime", nextReviewTimeMs,
+                                    "repetition", repetition,
+                                    "difficultyLevel", difficultyLevel,
+                                    "createTime", createTimeMs,
+                                    "updatedAt", updatedAtMs));
 
                 tx.commit();
-                log.info("闪卡已保存到 Neo4j：userId={}, database={}, hierarchyPath={}, flashCardId={}",
+                log.info("闪卡已保存到 Neo4j：userId={}, database={}, hierarchyPath={}, flashCardId={}", 
                     userId, databaseName, hierarchyPath, flashCardId);
             }
         } catch (Exception e) {
-            log.error("保存闪卡到 Neo4j 失败：userId={}, hierarchyPath={}, error={}",
+            log.error("保存闪卡到 Neo4j 失败：userId={}, hierarchyPath={}, error={}", 
                 userId, hierarchyPath, e.getMessage(), e);
             throw new RuntimeException("保存闪卡到 Neo4j 失败", e);
         }
@@ -221,7 +255,13 @@ public class Neo4jFlashCardService {
                                          String newHierarchyPath,
                                          String flashCardId,
                                          String flashCardTitle,
-                                         String flashCardContent) {
+                                         String flashCardContent,
+                                         String hierarchyPathForCard,
+                                         Long nextReviewTimeMs,
+                                         Integer repetition,
+                                         Integer difficultyLevel,
+                                         Long createTimeMs,
+                                         Long updatedAtMs) {
         if (newHierarchyPath == null || newHierarchyPath.trim().isEmpty()) {
             throw new IllegalArgumentException("新层级路径不能为空");
         }
@@ -333,13 +373,27 @@ public class Neo4jFlashCardService {
 
                 String createFlashCardQuery = "MATCH (level:" + lastLevelLabel + " {name: $levelName, userId: $userId}) " +
                                              "MERGE (card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
-                                             "SET card.title = $title, card.content = $content " +
+                                             "SET card.title = $title, " +
+                                             "    card.content = $content, " +
+                                             "    card.htmlContent = null, " +
+                                             "    card.hierarchyPath = $cardHierarchyPath, " +
+                                             "    card.nextReviewTime = $nextReviewTime, " +
+                                             "    card.repetition = $repetition, " +
+                                             "    card.difficultyLevel = $difficultyLevel, " +
+                                             "    card.createTime = $createTime, " +
+                                             "    card.updatedAt = $updatedAt " +
                                              "MERGE (level)-[:LINK_TO]->(card) RETURN card";
                 tx.run(createFlashCardQuery,
                     Values.parameters("levelName", lastLevelName, "userId", userId,
                                       "flashCardId", flashCardId,
                                       "title", flashCardTitle,
-                                      "content", flashCardContent));
+                                      "content", flashCardContent,
+                                      "cardHierarchyPath", hierarchyPathForCard,
+                                      "nextReviewTime", nextReviewTimeMs,
+                                      "repetition", repetition,
+                                      "difficultyLevel", difficultyLevel,
+                                      "createTime", createTimeMs,
+                                      "updatedAt", updatedAtMs));
 
                 tx.commit();
                 log.info("Neo4j 中闪卡层级已更新：userId={}, database={}, oldHierarchyPath={}, newHierarchyPath={}, flashCardId={}",
@@ -389,8 +443,18 @@ public class Neo4jFlashCardService {
      * @param flashCardId 闪卡ID
      * @param newTitle 新标题
      * @param newContent 新内容
+     * @param hierarchyPathForCard 闪卡层级路径（冗余存储在卡片节点上，便于查询）
+     * @param nextReviewTimeMs 下次复习时间（毫秒时间戳，可为 null）
+     * @param repetition 复习次数
+     * @param difficultyLevel 难度等级
+     * @param createTimeMs 创建时间（毫秒时间戳）
+     * @param updatedAtMs 更新时间（毫秒时间戳）
      */
-    public void updateFlashCardInNeo4j(Long userId, String flashCardId, String newTitle, String newContent) {
+    public void updateFlashCardInNeo4j(Long userId, String flashCardId,
+                                       String newTitle, String newContent,
+                                       String hierarchyPathForCard,
+                                       Long nextReviewTimeMs, Integer repetition, Integer difficultyLevel,
+                                       Long createTimeMs, Long updatedAtMs) {
         String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty()
             ? defaultDatabase
             : String.valueOf(userId);
@@ -401,10 +465,27 @@ public class Neo4jFlashCardService {
             try (Transaction tx = session.beginTransaction()) {
                 String flashCardLabel = "User_" + userId + "_FlashCard";
                 String updateQuery = "MATCH (card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
-                                     "SET card.title = $newTitle, card.content = $newContent " +
+                                     "SET card.title = $newTitle, " +
+                                     "    card.content = $newContent, " +
+                                     "    card.htmlContent = null, " +
+                                     "    card.hierarchyPath = $cardHierarchyPath, " +
+                                     "    card.nextReviewTime = $nextReviewTime, " +
+                                     "    card.repetition = $repetition, " +
+                                     "    card.difficultyLevel = $difficultyLevel, " +
+                                     "    card.createTime = $createTime, " +
+                                     "    card.updatedAt = $updatedAt " +
                                      "RETURN card";
-                tx.run(updateQuery, Values.parameters("flashCardId", flashCardId, "userId", userId,
-                                                    "newTitle", newTitle, "newContent", newContent));
+                tx.run(updateQuery, Values.parameters(
+                        "flashCardId", flashCardId,
+                        "userId", userId,
+                        "newTitle", newTitle,
+                        "newContent", newContent,
+                        "cardHierarchyPath", hierarchyPathForCard,
+                        "nextReviewTime", nextReviewTimeMs,
+                        "repetition", repetition,
+                        "difficultyLevel", difficultyLevel,
+                        "createTime", createTimeMs,
+                        "updatedAt", updatedAtMs));
                 tx.commit();
                 log.info("Neo4j 中闪卡已更新：userId={}, database={}, flashCardId={}", userId, databaseName, flashCardId);
             }
@@ -476,4 +557,250 @@ public class Neo4jFlashCardService {
             throw new RuntimeException("从 Neo4j 删除闪卡层级失败", e);
         }
     }
+
+    /**
+     * 根据关键词和类型搜索用户 Neo4j 数据库中的节点
+     *
+     * @param userId  用户ID
+     * @param type    节点类型：ROOT / LEVEL / FLASHCARD / ALL
+     * @param keyword 关键词（模糊匹配）
+     * @return 搜索结果列表，每个结果包含：节点的全部属性 + type 字段
+     */
+    public List<Map<String, Object>> searchNodes(Long userId, String type, String keyword) {
+        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty()
+                ? defaultDatabase
+                : String.valueOf(userId);
+
+        // 确保用户数据库存在
+        ensureDatabaseExists(databaseName);
+
+        String normalizedType = type == null ? "ALL" : type.trim().toUpperCase();
+        String safeKeyword = keyword == null ? "" : keyword.trim();
+
+        // 如果关键词为空，直接返回空列表，避免全表扫描
+        if (safeKeyword.isEmpty()) {
+            return List.of();
+        }
+
+        String rootLabel = "User_" + userId + "_Root";
+        String level1Label = "User_" + userId + "_Level1";
+        String level2Label = "User_" + userId + "_Level2";
+        String level3Label = "User_" + userId + "_Level3";
+        String flashCardLabel = "User_" + userId + "_FlashCard";
+
+        // 构建不同类型的查询片段
+        StringBuilder queryBuilder = new StringBuilder();
+
+        if ("ROOT".equals(normalizedType) || "ALL".equals(normalizedType)) {
+            queryBuilder.append("MATCH (n:")
+                    .append(rootLabel)
+                    .append(" {userId: $userId}) ")
+                    .append("WHERE toLower(n.name) CONTAINS toLower($keyword) ")
+                    .append("RETURN n AS node, 'ROOT' AS type ");
+        }
+
+        if ("LEVEL".equals(normalizedType) || "ALL".equals(normalizedType)) {
+            if (queryBuilder.length() > 0) {
+                queryBuilder.append("UNION ALL ");
+            }
+            // Level1-3
+            queryBuilder.append("MATCH (n1:")
+                    .append(level1Label)
+                    .append(" {userId: $userId}) ")
+                    .append("WHERE toLower(n1.name) CONTAINS toLower($keyword) ")
+                    .append("RETURN n1 AS node, 'LEVEL' AS type ");
+
+            queryBuilder.append("UNION ALL MATCH (n2:")
+                    .append(level2Label)
+                    .append(" {userId: $userId}) ")
+                    .append("WHERE toLower(n2.name) CONTAINS toLower($keyword) ")
+                    .append("RETURN n2 AS node, 'LEVEL' AS type ");
+
+            queryBuilder.append("UNION ALL MATCH (n3:")
+                    .append(level3Label)
+                    .append(" {userId: $userId}) ")
+                    .append("WHERE toLower(n3.name) CONTAINS toLower($keyword) ")
+                    .append("RETURN n3 AS node, 'LEVEL' AS type ");
+        }
+
+        if ("FLASHCARD".equals(normalizedType) || "ALL".equals(normalizedType)) {
+            if (queryBuilder.length() > 0) {
+                queryBuilder.append("UNION ALL ");
+            }
+            queryBuilder.append("MATCH (n:")
+                    .append(flashCardLabel)
+                    .append(" {userId: $userId}) ")
+                    .append("WHERE toLower(n.title) CONTAINS toLower($keyword) ")
+                    .append("RETURN n AS node, 'FLASHCARD' AS type ");
+        }
+
+        // 如果类型不合法，直接返回空
+        if (queryBuilder.length() == 0) {
+            return List.of();
+        }
+
+        String cypher = queryBuilder.toString() + " LIMIT 100";
+
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            var result = session.run(cypher, Values.parameters(
+                    "userId", userId,
+                    "keyword", safeKeyword
+            ));
+
+            List<Map<String, Object>> list = new ArrayList<>();
+            result.stream().forEach(record -> {
+                // 将节点的全部属性放入结果，并额外附加 type 字段
+                Map<String, Object> nodeProps = record.get("node").asMap();
+                Map<String, Object> map = new HashMap<>(nodeProps);
+                map.put("type", record.get("type").asString(""));
+                list.add(map);
+            });
+
+            return list;
+        } catch (Exception e) {
+            log.error("搜索 Neo4j 节点失败：userId={}, type={}, keyword={}, error={}",
+                    userId, normalizedType, safeKeyword, e.getMessage(), e);
+            throw new RuntimeException("搜索 Neo4j 节点失败", e);
+        }
+    }
+
+    /**
+     * 按更新时间筛选，返回“完整图谱”：节点 + 关系 + 对应层级结构（root->...->flashcard）
+     *
+     * @param userId 用户ID
+     * @param range 时间范围（支持：ALL/全部、近7天、近半个月、近1个月、近半年、近一年、一年前）
+     * @return Map，包含 nodes 和 relationships 两个列表，且每个节点/关系都包含完整属性
+     */
+    public Map<String, Object> getGraphByUpdatedAtRange(Long userId, String range) {
+        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty()
+                ? defaultDatabase
+                : String.valueOf(userId);
+
+        ensureDatabaseExists(databaseName);
+
+        long now = System.currentTimeMillis();
+        Long from = null;
+        Long to = null;
+
+        String r = range == null ? "ALL" : range.trim();
+
+        // 兼容中文 tab
+        if ("全部".equals(r)) {
+            r = "ALL";
+        } else if ("近7天".equals(r)) {
+            r = "LAST_7_DAYS";
+        } else if ("近半个月".equals(r)) {
+            r = "LAST_HALF_MONTH";
+        } else if ("近1个月".equals(r)) {
+            r = "LAST_1_MONTH";
+        } else if ("近半年".equals(r)) {
+            r = "LAST_HALF_YEAR";
+        } else if ("近一年".equals(r)) {
+            r = "LAST_1_YEAR";
+        } else if ("一年前".equals(r)) {
+            r = "BEFORE_1_YEAR";
+        }
+
+        switch (r.toUpperCase()) {
+            case "ALL":
+                from = null;
+                to = null;
+                break;
+            case "LAST_7_DAYS":
+                from = now - 7L * 24 * 60 * 60 * 1000;
+                to = now;
+                break;
+            case "LAST_HALF_MONTH":
+                from = now - 15L * 24 * 60 * 60 * 1000;
+                to = now;
+                break;
+            case "LAST_1_MONTH":
+                from = now - 30L * 24 * 60 * 60 * 1000;
+                to = now;
+                break;
+            case "LAST_HALF_YEAR":
+                from = now - 180L * 24 * 60 * 60 * 1000;
+                to = now;
+                break;
+            case "LAST_1_YEAR":
+                from = now - 365L * 24 * 60 * 60 * 1000;
+                to = now;
+                break;
+            case "BEFORE_1_YEAR":
+                from = null;
+                to = now - 365L * 24 * 60 * 60 * 1000;
+                break;
+            default:
+                // 非法值默认 ALL
+                from = null;
+                to = null;
+                break;
+        }
+
+        String rootLabel = "User_" + userId + "_Root";
+        String flashCardLabel = "User_" + userId + "_FlashCard";
+
+        String cypher = "MATCH p=(root:" + rootLabel + " {userId: $userId})-[:LINK_TO*1..6]->" +
+                "(card:" + flashCardLabel + " {userId: $userId}) " +
+                "WHERE ($from IS NULL OR card.updatedAt >= $from) " +
+                "  AND ($to IS NULL OR card.updatedAt < $to) " +
+                "RETURN p";
+
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            var result = session.run(cypher, Values.parameters(
+                    "userId", userId,
+                    "from", from,
+                    "to", to
+            ));
+
+            // 去重：保留首次出现顺序，便于前端渲染稳定
+            // Neo4j 5 建议使用 elementId（稳定标识），避免使用内部 id（已废弃）
+            Map<String, Map<String, Object>> nodesById = new LinkedHashMap<>();
+            Map<String, Map<String, Object>> relsById = new LinkedHashMap<>();
+
+            while (result.hasNext()) {
+                Record record = result.next();
+                Path p = record.get("p").asPath();
+
+                for (Node n : p.nodes()) {
+                    nodesById.computeIfAbsent(n.elementId(), k -> {
+                        Map<String, Object> nodeMap = new HashMap<>();
+                        nodeMap.put("elementId", n.elementId());
+                        List<String> labels = new ArrayList<>();
+                        n.labels().forEach(labels::add);
+                        nodeMap.put("labels", labels);
+                        // 节点完整属性
+                        nodeMap.putAll(n.asMap());
+                        return nodeMap;
+                    });
+                }
+
+                for (Relationship rel : p.relationships()) {
+                    relsById.computeIfAbsent(rel.elementId(), k -> {
+                        Map<String, Object> relMap = new HashMap<>();
+                        relMap.put("elementId", rel.elementId());
+                        relMap.put("type", rel.type());
+                        relMap.put("startNodeElementId", rel.startNodeElementId());
+                        relMap.put("endNodeElementId", rel.endNodeElementId());
+                        // 关系完整属性
+                        relMap.putAll(rel.asMap());
+                        return relMap;
+                    });
+                }
+            }
+
+            Map<String, Object> resp = new HashMap<>();
+            resp.put("nodes", new ArrayList<>(nodesById.values()));
+            resp.put("relationships", new ArrayList<>(relsById.values()));
+            resp.put("range", r);
+            resp.put("from", from);
+            resp.put("to", to);
+            return resp;
+        } catch (Exception e) {
+            log.error("按更新时间筛选图谱失败：userId={}, range={}, from={}, to={}, error={}",
+                    userId, range, from, to, e.getMessage(), e);
+            throw new RuntimeException("按更新时间筛选图谱失败", e);
+        }
+    }
 }
+
