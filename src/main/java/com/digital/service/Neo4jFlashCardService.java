@@ -124,8 +124,8 @@ public class Neo4jFlashCardService {
      * @param flashCardContent 闪卡内容
      * @param flashCardId 闪卡ID（用于关联）
      */
-    public void saveFlashCardToNeo4j(Long userId, String hierarchyPath, 
-                                     String flashCardTitle, String flashCardContent, 
+    public void saveFlashCardToNeo4j(Long userId, String hierarchyPath,
+                                     String flashCardTitle, String flashCardContent,
                                      String flashCardId) {
         if (hierarchyPath == null || hierarchyPath.trim().isEmpty()) {
             throw new IllegalArgumentException("层级路径不能为空");
@@ -198,13 +198,157 @@ public class Neo4jFlashCardService {
                                     "content", flashCardContent));
 
                 tx.commit();
-                log.info("闪卡已保存到 Neo4j：userId={}, database={}, hierarchyPath={}, flashCardId={}", 
+                log.info("闪卡已保存到 Neo4j：userId={}, database={}, hierarchyPath={}, flashCardId={}",
                     userId, databaseName, hierarchyPath, flashCardId);
             }
         } catch (Exception e) {
-            log.error("保存闪卡到 Neo4j 失败：userId={}, hierarchyPath={}, error={}", 
+            log.error("保存闪卡到 Neo4j 失败：userId={}, hierarchyPath={}, error={}",
                 userId, hierarchyPath, e.getMessage(), e);
             throw new RuntimeException("保存闪卡到 Neo4j 失败", e);
+        }
+    }
+
+    /**
+     * 更新闪卡在 Neo4j 中的层级路径。
+     * 实现方式：
+     * 1. 删除该闪卡与旧层级节点之间的 LINK_TO 关系（不删除根节点和其他可能复用的层级节点）
+     * 2. 按照新的层级路径重新创建层级结构并关联闪卡
+     *
+     * 注意：根节点不会被删除。
+     */
+    public void moveFlashCardToHierarchy(Long userId,
+                                         String oldHierarchyPath,
+                                         String newHierarchyPath,
+                                         String flashCardId,
+                                         String flashCardTitle,
+                                         String flashCardContent) {
+        if (newHierarchyPath == null || newHierarchyPath.trim().isEmpty()) {
+            throw new IllegalArgumentException("新层级路径不能为空");
+        }
+
+        // 使用 userId 作为数据库名，如果配置了默认数据库则使用默认值
+        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty()
+            ? defaultDatabase
+            : String.valueOf(userId);
+
+        // 确保用户数据库存在
+        ensureDatabaseExists(databaseName);
+
+        // 解析新的层级路径（校验逻辑与 saveFlashCardToNeo4j 保持一致）
+        String normalizedNewPath = newHierarchyPath.trim().replaceAll("^/+|/+$", "");
+        String[] newLevels = Arrays.stream(normalizedNewPath.split("/"))
+                .filter(level -> !level.trim().isEmpty())
+                .toArray(String[]::new);
+
+        if (newLevels.length < 2 || newLevels.length > 4) {
+            throw new IllegalArgumentException("层级路径必须是2-4级，格式：根/课程/HTML 或 根/课程/前端/HTML");
+        }
+
+        if (!"根".equals(newLevels[0])) {
+            throw new IllegalArgumentException("层级路径的第一级必须是 '根'");
+        }
+
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            try (Transaction tx = session.beginTransaction()) {
+                String flashCardLabel = "User_" + userId + "_FlashCard";
+
+                // ========= 1. 从旧路径上解绑闪卡，并按规则清理中间层级节点 =========
+                if (oldHierarchyPath != null && !oldHierarchyPath.trim().isEmpty()) {
+                    String normalizedOldPath = oldHierarchyPath.trim().replaceAll("^/+|/+$", "");
+                    String[] oldLevels = Arrays.stream(normalizedOldPath.split("/"))
+                            .filter(level -> !level.trim().isEmpty())
+                            .toArray(String[]::new);
+
+                    if (oldLevels.length >= 2 && "根".equals(oldLevels[0])) {
+                        // 1.1 删除最后一级与闪卡之间的关系
+                        String oldLastLevelLabel = "User_" + userId + "_Level" + (oldLevels.length - 1);
+                        String oldLastLevelName = oldLevels[oldLevels.length - 1];
+                        String detachQuery = "MATCH (level:" + oldLastLevelLabel + " {name: $levelName, userId: $userId})" +
+                                             "-[r:LINK_TO]->(card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
+                                             "DELETE r";
+                        tx.run(detachQuery, Values.parameters(
+                                "levelName", oldLastLevelName,
+                                "userId", userId,
+                                "flashCardId", flashCardId
+                        ));
+
+                        // 1.2 自底向上检查并清理旧路径上的节点（包含最后一级，但不包含根）：
+                        //     - 如果某节点已经没有任何子节点（不再 LINK_TO 任何下级节点或闪卡），
+                        //       则删除它与父节点之间的关系以及该节点本身。
+                        for (int depth = oldLevels.length - 1; depth >= 1; depth--) {
+                            String currentLabel = "User_" + userId + "_Level" + depth;
+                            String currentName = oldLevels[depth];
+                            String parentLabel = depth == 1 ? "User_" + userId + "_Root"
+                                                            : "User_" + userId + "_Level" + (depth - 1);
+                            String parentName = oldLevels[depth - 1];
+
+                            String cleanupQuery =
+                                    "MATCH (parent:" + parentLabel + " {name: $parentName, userId: $userId})" +
+                                    "-[pr:LINK_TO]->(curr:" + currentLabel + " {name: $currName, userId: $userId}) " +
+                                    "OPTIONAL MATCH (curr)-[cr:LINK_TO]->(child) " +
+                                    "WITH parent, curr, pr, count(cr) AS childCount " +
+                                    "WHERE childCount = 0 " +
+                                    "DETACH DELETE curr";
+
+                            tx.run(cleanupQuery, Values.parameters(
+                                    "parentName", parentName,
+                                    "currName", currentName,
+                                    "userId", userId
+                            ));
+                        }
+                    } else {
+                        log.warn("旧层级路径格式不合法或不以 '根' 开头，跳过旧路径清理：userId={}, oldHierarchyPath={}",
+                                userId, oldHierarchyPath);
+                    }
+                } else {
+                    // 旧路径未知时，至少保证移除该闪卡与任意层级节点之间的 LINK_TO 关系
+                    String genericDetach = "MATCH (card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
+                                           "OPTIONAL MATCH (level)-[r:LINK_TO]->(card) DELETE r";
+                    tx.run(genericDetach, Values.parameters("flashCardId", flashCardId, "userId", userId));
+                }
+
+                // ========= 2. 按新的路径重新创建层级结构并关联闪卡 =========
+                String rootLabel = "User_" + userId + "_Root";
+                String rootQuery = "MERGE (root:" + rootLabel + " {name: $rootName, userId: $userId}) RETURN root";
+                tx.run(rootQuery, Values.parameters("rootName", newLevels[0], "userId", userId));
+
+                String previousLabel = rootLabel;
+                for (int i = 1; i < newLevels.length; i++) {
+                    String levelName = newLevels[i].trim();
+                    if (levelName.isEmpty()) {
+                        continue;
+                    }
+                    String currentLabel = "User_" + userId + "_Level" + i;
+                    String createLevelQuery = "MATCH (prev:" + previousLabel + " {name: $prevName, userId: $userId}) " +
+                                             "MERGE (curr:" + currentLabel + " {name: $currName, userId: $userId}) " +
+                                             "MERGE (prev)-[:LINK_TO]->(curr) RETURN curr";
+                    tx.run(createLevelQuery,
+                        Values.parameters("prevName", newLevels[i - 1], "userId", userId,
+                                          "currName", levelName));
+                    previousLabel = currentLabel;
+                }
+
+                String lastLevelLabel = "User_" + userId + "_Level" + (newLevels.length - 1);
+                String lastLevelName = newLevels[newLevels.length - 1];
+
+                String createFlashCardQuery = "MATCH (level:" + lastLevelLabel + " {name: $levelName, userId: $userId}) " +
+                                             "MERGE (card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
+                                             "SET card.title = $title, card.content = $content " +
+                                             "MERGE (level)-[:LINK_TO]->(card) RETURN card";
+                tx.run(createFlashCardQuery,
+                    Values.parameters("levelName", lastLevelName, "userId", userId,
+                                      "flashCardId", flashCardId,
+                                      "title", flashCardTitle,
+                                      "content", flashCardContent));
+
+                tx.commit();
+                log.info("Neo4j 中闪卡层级已更新：userId={}, database={}, oldHierarchyPath={}, newHierarchyPath={}, flashCardId={}",
+                    userId, databaseName, oldHierarchyPath, newHierarchyPath, flashCardId);
+            }
+        } catch (Exception e) {
+            log.error("更新 Neo4j 中闪卡层级失败：userId={}, oldHierarchyPath={}, newHierarchyPath={}, flashCardId={}, error={}",
+                userId, oldHierarchyPath, newHierarchyPath, flashCardId, e.getMessage(), e);
+            throw new RuntimeException("更新 Neo4j 中闪卡层级失败", e);
         }
     }
 

@@ -206,3 +206,6 @@ ALTER TABLE flash_card ADD COLUMN ef DOUBLE DEFAULT 2.5;
 
 -- Add 'interval' column (Note the backticks for 'interval')
 ALTER TABLE flash_card ADD COLUMN `interval` INT DEFAULT 0;
+
+
+ALTER TABLE flash_card ADD COLUMN hierarchyPath VARCHAR(255) NULL COMMENT '闪卡层级路径，例如 根/课程/HTML';

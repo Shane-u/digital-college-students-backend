@@ -356,6 +356,10 @@
                     <label class="form-label">HTML内容（可选）</label>
                     <textarea id="editHtmlContent" class="form-textarea"></textarea>
                 </div>
+                <div class="form-group">
+                    <label class="form-label">层级标签路径（例如：根/课程/HTML）</label>
+                    <input type="text" id="editHierarchyPath" class="form-input" placeholder="不修改层级可留空">
+                </div>
                 <div class="form-actions">
                     <button type="button" class="btn-secondary" onclick="closeEditModal()">取消</button>
                     <button type="submit" class="btn-primary">保存</button>
@@ -768,6 +772,8 @@
             document.getElementById('editTitle').value = card.title || '';
             document.getElementById('editContent').value = card.content || '';
             document.getElementById('editHtmlContent').value = card.htmlContent || '';
+            // 已保存闪卡可以修改其层级路径（根路径在后端会做校验）
+            document.getElementById('editHierarchyPath').value = card.hierarchyPath || '';
             document.getElementById('editModal').classList.add('active');
         }
 
@@ -788,6 +794,8 @@
                     document.getElementById('editTitle').value = card.title || '';
                     document.getElementById('editContent').value = card.content || '';
                     document.getElementById('editHtmlContent').value = card.htmlContent || '';
+                    // 临时闪卡尚未确定层级，保持为空（前端不处理）
+                    document.getElementById('editHierarchyPath').value = card.hierarchyPath || '';
                     document.getElementById('editModal').classList.add('active');
                 } else {
                     showError('加载临时闪卡失败: ' + result.message);
@@ -812,6 +820,7 @@
             const title = document.getElementById('editTitle').value;
             const content = document.getElementById('editContent').value;
             const htmlContent = document.getElementById('editHtmlContent').value;
+            const hierarchyPath = document.getElementById('editHierarchyPath').value;
 
             // 确保ID是字符串类型（后端现在接受String类型）
             const cardIdStr = String(cardId);
@@ -833,7 +842,8 @@
                         id: cardIdStr,
                         title: title,
                         content: content,
-                        htmlContent: htmlContent
+                        htmlContent: htmlContent,
+                        hierarchyPath: hierarchyPath
                     })
                 });
 

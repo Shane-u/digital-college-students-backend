@@ -31,6 +31,12 @@ public class FlashCardUpdateRequest implements Serializable {
      */
     private String htmlContent;
 
+    /**
+     * 闪卡层级路径（用于更新 Neo4j 中的层级结构）
+     * 例如：根/课程/HTML 或 根/课程/前端/HTML
+     */
+    private String hierarchyPath;
+
     private static final long serialVersionUID = 1L;
 }
 

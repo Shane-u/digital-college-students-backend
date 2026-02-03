@@ -84,6 +84,12 @@ public class FlashCard {
     private Integer difficultyLevel;
 
     /**
+     * 闪卡当前所属的层级路径（用于与 Neo4j 中的层级结构同步）
+     * 例如：根/课程/HTML 或 根/课程/前端/HTML
+     */
+    private String hierarchyPath;
+
+    /**
      * 创建时间
      */
     private Date createTime;

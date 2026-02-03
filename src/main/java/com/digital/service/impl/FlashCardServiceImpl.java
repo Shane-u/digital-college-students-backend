@@ -31,6 +31,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.Resource;
 import java.util.ArrayList;
@@ -426,6 +427,7 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean updateFlashCard(Long userId, FlashCardUpdateRequest request) {
         ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
         ThrowUtils.throwIf(StringUtils.isBlank(request.getId()), ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
@@ -439,11 +441,14 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         FlashCard flashCard = this.getOne(queryWrapper);
         ThrowUtils.throwIf(flashCard == null, ErrorCode.NOT_FOUND_ERROR, "闪卡不存在");
 
-        // 保存更新前的值，用于Neo4j同步
+        // 保存更新前的值，用于 MySQL 与 Neo4j 同步
         String oldTitle = flashCard.getTitle();
         String oldContent = flashCard.getContent();
+        String oldHierarchyPath = flashCard.getHierarchyPath();
+
         String newTitle = oldTitle;
         String newContent = oldContent;
+        String newHierarchyPath = oldHierarchyPath;
 
         // 更新字段
         if (StringUtils.isNotBlank(request.getTitle())) {
@@ -458,27 +463,69 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
             flashCard.setHtmlContent(request.getHtmlContent());
         }
 
-        // 先更新MySQL
-        boolean updated = this.updateById(flashCard);
-        if (updated) {
-            // MySQL更新成功后，同步更新Neo4j
-            try {
-                // 只有当title或content发生变化时才更新Neo4j
-                if (!oldTitle.equals(newTitle) || !oldContent.equals(newContent)) {
-                    neo4jFlashCardService.updateFlashCardInNeo4j(userId, request.getId(), newTitle, newContent);
-                    log.info("闪卡 {} 已成功在 MySQL 和 Neo4j 中同步更新", request.getId());
-                } else {
-                    log.debug("闪卡 {} 的 title 和 content 未变化，跳过 Neo4j 更新", request.getId());
+        // 处理层级路径更新：根路径不能被修改
+        if (StringUtils.isNotBlank(request.getHierarchyPath())) {
+            newHierarchyPath = normalizeHierarchyPath(request.getHierarchyPath());
+
+            if (StringUtils.isNotBlank(oldHierarchyPath)) {
+                String normalizedOld = normalizeHierarchyPath(oldHierarchyPath);
+                String oldRoot = extractRootFromHierarchyPath(normalizedOld);
+                String newRoot = extractRootFromHierarchyPath(newHierarchyPath);
+
+                if (oldRoot != null && newRoot != null && !oldRoot.equals(newRoot)) {
+                    log.warn("尝试修改闪卡根路径被拒绝：userId={}, flashCardId={}, oldRoot={}, newRoot={}",
+                            userId, flashCardId, oldRoot, newRoot);
+                    throw new BusinessException(ErrorCode.PARAMS_ERROR, "根路径不能被修改");
                 }
-            } catch (Exception e) {
-                log.error("在 Neo4j 中更新闪卡失败：userId={}, flashCardId={}, error={}", userId, request.getId(), e.getMessage(), e);
-                // Neo4j 更新失败不影响主流程，但记录错误日志
-                // 注意：这里可以考虑添加重试机制或告警通知
             }
-        } else {
-            log.warn("MySQL 更新闪卡失败：userId={}, flashCardId={}", userId, request.getId());
+
+            flashCard.setHierarchyPath(newHierarchyPath);
         }
-        return updated;
+
+        // 先更新 MySQL
+        boolean updated = this.updateById(flashCard);
+        if (!updated) {
+            log.warn("MySQL 更新闪卡失败：userId={}, flashCardId={}", userId, request.getId());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "更新闪卡失败");
+        }
+
+        // MySQL 更新成功后，同步更新 Neo4j
+        try {
+            // 1. 如果标题或内容发生变化，同步内容到 Neo4j
+            if (!oldTitle.equals(newTitle) || !oldContent.equals(newContent)) {
+                neo4jFlashCardService.updateFlashCardInNeo4j(userId, request.getId(), newTitle, newContent);
+                log.info("闪卡 {} 内容已在 MySQL 和 Neo4j 中同步更新", request.getId());
+            } else {
+                log.debug("闪卡 {} 的 title 和 content 未变化，跳过 Neo4j 内容更新", request.getId());
+            }
+
+            // 2. 如果层级路径发生变化，则更新 Neo4j 中的层级结构
+            String normalizedOldPath = StringUtils.isBlank(oldHierarchyPath) ? null : normalizeHierarchyPath(oldHierarchyPath);
+            String normalizedNewPath = StringUtils.isBlank(newHierarchyPath) ? null : normalizeHierarchyPath(newHierarchyPath);
+
+            if (normalizedNewPath != null &&
+                    (normalizedOldPath == null || !normalizedOldPath.equals(normalizedNewPath))) {
+                neo4jFlashCardService.moveFlashCardToHierarchy(
+                        userId,
+                        normalizedOldPath,
+                        normalizedNewPath,
+                        flashCardId,
+                        newTitle,
+                        newContent
+                );
+                log.info("闪卡 {} 的层级路径已在 Neo4j 中更新：oldPath={}, newPath={}",
+                        flashCardId, normalizedOldPath, normalizedNewPath);
+            } else {
+                log.debug("闪卡 {} 的层级路径未变化或未提供新路径，跳过 Neo4j 层级更新", flashCardId);
+            }
+        } catch (Exception e) {
+            log.error("更新 Neo4j 中闪卡或层级失败：userId={}, flashCardId={}, error={}",
+                    userId, request.getId(), e.getMessage(), e);
+            // 抛出异常以触发事务回滚（回滚 MySQL 更新）
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "同步更新 Neo4j 失败：" + e.getMessage());
+        }
+
+        return true;
     }
 
     @Override
@@ -851,6 +898,8 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         newFlashCard.setId(null); // 让 MyBatis Plus 生成新的 ID
         newFlashCard.setCreateTime(new Date());
         newFlashCard.setUpdateTime(new Date());
+        // 将层级路径保存到 MySQL，便于后续更新时比较和校验
+        newFlashCard.setHierarchyPath(normalizeHierarchyPath(hierarchyPath));
 
         boolean saved = this.save(newFlashCard);
         if (!saved) {
@@ -902,6 +951,31 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
                 userId, hierarchyPath, e.getMessage(), e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "删除闪卡层级失败");
         }
+    }
+
+    /**
+     * 规范化层级路径：去除首尾斜杠、合并多余斜杠
+     */
+    private String normalizeHierarchyPath(String hierarchyPath) {
+        if (hierarchyPath == null) {
+            return null;
+        }
+        String normalized = hierarchyPath.trim().replaceAll("^/+|/+$", "");
+        // 合并中间可能的多个连续斜杠
+        normalized = normalized.replaceAll("/+", "/");
+        return normalized;
+    }
+
+    /**
+     * 从层级路径中提取根节点名称（第一级）
+     */
+    private String extractRootFromHierarchyPath(String hierarchyPath) {
+        if (StringUtils.isBlank(hierarchyPath)) {
+            return null;
+        }
+        String normalized = normalizeHierarchyPath(hierarchyPath);
+        String[] parts = normalized.split("/");
+        return parts.length > 0 ? parts[0] : null;
     }
 
     @Override
