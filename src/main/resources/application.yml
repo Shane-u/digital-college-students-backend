@@ -130,6 +130,8 @@ silicon-flow:
   base-url: https://api.siliconflow.cn  # API基础URL
   model: THUDM/glm-4-9b-chat # 默认模型
   timeout: 300000  # 请求超时时间（毫秒），设置为5分钟，因为生成闪卡（包含HTML+CSS+SVG）可能需要较长时间
+  # 孪孪伴学学习路径规划使用的模型（Qwen）
+  learning-path-model: ${SILICON_FLOW_LEARNING_PATH_MODEL:Qwen/Qwen3-30B-A3B-Instruct-2507}
 # 接口文档配置
 knife4j:
   enable: true
@@ -232,3 +234,4 @@ neo4j:
   # 数据库名（可选）：如果不配置或为空，将自动使用 userId 作为数据库名
   # 如果配置了值，则所有用户都使用该数据库
   database: ${NEO4J_DATABASE:}
+  learning_path_database: ${NEO4J_LEARNING_PATH_DATABASE:}
