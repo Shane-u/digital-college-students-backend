@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>孪孪伴学 - 学习路径</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #fafafa;
+            color: #333;
+            min-height: 100vh;
+            padding: 24px;
+            line-height: 1.6;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 24px;
+            color: #1a1a1a;
+        }
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.06);
+            border: 1px solid #eee;
+        }
+        .card h2 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 12px;
+        }
+        label {
+            display: block;
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        textarea {
+            min-height: 80px;
+            font-family: inherit;
+            resize: vertical;
+        }
+        .row { display: flex; gap: 12px; align-items: flex-end; }
+        .row .field { flex: 1; }
+        .row input { margin-bottom: 0; }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        button:hover { background: #333; }
+        button:disabled { opacity: .6; cursor: not-allowed; }
+        button.secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+        button.secondary:hover { background: #e5e5e5; }
+        .output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 16px;
+            border-radius: 6px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .output.empty { color: #888; }
+        .status {
+            font-size: 12px;
+            color: #888;
+            margin-top: 8px;
+        }
+        .status.streaming { color: #0a0; }
+        .status.done { color: #06c; }
+        .status.err { color: #c00; }
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .tab {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            background: #fff;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .tab.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+        .panel { display: none; }
+        .panel.active { display: block; }
+        .list-item {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .list-item:last-child { border-bottom: none; }
+        .list-item .topic { font-weight: 500; }
+        .list-item .meta { font-size: 12px; color: #888; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>孪孪伴学 · 学习路径</h1>
+
+        <div class="card">
+            <h2>规划学习路径</h2>
+            <label>用户提示词</label>
+            <textarea id="userPrompt" placeholder="例如：当前想要学习 Java，请给出学习 Java 的学习路径。">当前想要学习 Java，请给出学习 Java 的学习路径。</textarea>
+            <div class="row">
+                <div class="field">
+                    <label>用户 ID</label>
+                    <input type="number" id="userId" value="1986990047206002690" placeholder="必填，未登录时使用">
+                </div>
+                <button id="btnPlan">开始规划</button>
+            </div>
+            <div class="status" id="planStatus"></div>
+            <div class="output empty" id="planOutput">等待规划...</div>
+            <div style="margin-top: 12px;">
+                <button class="secondary" id="btnCopy">复制 JSON</button>
+                <button class="secondary" id="btnSave" style="margin-left: 8px;">保存到数据库</button>
+            </div>
+            <div class="status" style="margin-top: 10px;">
+                当前选中路径：<span id="selectedPathId" style="color:#333;">未选择</span>
+            </div>
+            <div style="margin-top: 10px;">
+                <button class="secondary" id="btnUpdateSelected">用上方 JSON 更新选中路径</button>
+                <button class="secondary" id="btnDeleteSelected" style="margin-left: 8px;">删除选中路径</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>润色 / 修改（基于当前路径）</h2>
+            <label>修改要求（会基于当前路径进行增删改，不要粘贴整份 JSON）</label>
+            <textarea id="polishPrompt" placeholder="例如：请补全到 3-4 层、更完整，增加工程化/性能优化/测试/安全/部署等模块，并保持 testPointsProgress、childrenProgress 都为 0/0。">请在当前学习路径基础上增强复杂性和完整性，输出 3-4 层结构，补全工程化、性能优化、测试、安全与部署相关内容，并保持 testPointsProgress、childrenProgress 都为 0/0。</textarea>
+            <div class="row">
+                <div class="field">
+                    <label>用户 ID</label>
+                    <input type="number" id="polishUserId" value="1986990047206002690" placeholder="必填，未登录时使用">
+                </div>
+                <button id="btnPolish">开始润色</button>
+            </div>
+            <div class="status" id="polishStatus"></div>
+            <div class="output empty" id="polishOutput">等待润色...</div>
+            <div style="margin-top: 12px;">
+                <button class="secondary" id="btnUsePolish">将润色结果放到上方</button>
+                <button class="secondary" id="btnUpdateWithPolish" style="margin-left: 8px;">用润色结果更新选中路径</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>我的学习路径</h2>
+            <div class="row">
+                <div class="field">
+                    <label>用户 ID</label>
+                    <input type="number" id="listUserId" value="1986990047206002690">
+                </div>
+                <button id="btnList">刷新列表</button>
+            </div>
+            <div id="pathList"></div>
+        </div>
+    </div>
+
+    <script>
+        const API = '/api';
+        const userIdEl = document.getElementById('userId');
+        const userPromptEl = document.getElementById('userPrompt');
+        const planOutputEl = document.getElementById('planOutput');
+        const planStatusEl = document.getElementById('planStatus');
+        const btnPlan = document.getElementById('btnPlan');
+        const btnCopy = document.getElementById('btnCopy');
+        const btnSave = document.getElementById('btnSave');
+        const btnList = document.getElementById('btnList');
+        const listUserIdEl = document.getElementById('listUserId');
+        const pathListEl = document.getElementById('pathList');
+        const selectedPathIdEl = document.getElementById('selectedPathId');
+        const btnUpdateSelected = document.getElementById('btnUpdateSelected');
+        const btnDeleteSelected = document.getElementById('btnDeleteSelected');
+
+        const polishPromptEl = document.getElementById('polishPrompt');
+        const polishUserIdEl = document.getElementById('polishUserId');
+        const btnPolish = document.getElementById('btnPolish');
+        const polishStatusEl = document.getElementById('polishStatus');
+        const polishOutputEl = document.getElementById('polishOutput');
+        const btnUsePolish = document.getElementById('btnUsePolish');
+        const btnUpdateWithPolish = document.getElementById('btnUpdateWithPolish');
+
+        let _selectedPathId = null;
+        let _selectedUserId = null;
+
+        function decode(s) {
+            if (!s) return '';
+            return String(s).replace(/&#32;/g, ' ').replace(/&#92n/g, '\n');
+        }
+
+        function processSseChunk(buffer, fullText, append) {
+            const lines = buffer.split(/\r?\n/);
+            for (const line of lines) {
+                const idx = line.indexOf('data:');
+                if (idx === 0 || (idx === 1 && line[0] === ' ')) {
+                    const data = line.slice(line.indexOf(':') + 1).replace(/^\s+/, '');
+                    if (data && data !== '[DONE]') {
+                        const decoded = decode(data);
+                        fullText += decoded;
+                        append(fullText);
+                    }
+                }
+            }
+            return fullText;
+        }
+
+        async function streamTo(url, body, onDelta, onDone) {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+            let fullText = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (value) buffer += decoder.decode(value, { stream: true });
+                if (done) break;
+
+                const parts = buffer.split(/\r?\n\r?\n/);
+                buffer = parts.pop() || '';
+                for (const part of parts) {
+                    fullText = processSseChunk(part, fullText, onDelta);
+                }
+            }
+            fullText = processSseChunk(buffer, fullText, onDelta);
+            onDone(fullText);
+        }
+
+        async function planStream() {
+            const userPrompt = userPromptEl.value.trim();
+            const userId = parseInt(userIdEl.value, 10);
+            if (!userPrompt) { alert('请输入提示词'); return; }
+            if (!userId) { alert('请输入用户 ID'); return; }
+
+            btnPlan.disabled = true;
+            planOutputEl.textContent = '';
+            planOutputEl.classList.remove('empty');
+            planStatusEl.textContent = '正在规划...';
+            planStatusEl.className = 'status streaming';
+
+            try {
+                await streamTo(
+                    API + '/learning-path/plan/stream/flux',
+                    { userPrompt, currentPathJson: null, userId },
+                    (text) => {
+                        planOutputEl.textContent = text;
+                        planOutputEl.scrollTop = planOutputEl.scrollHeight;
+                    },
+                    (fullText) => {
+                        planStatusEl.textContent = '规划完成';
+                        planStatusEl.className = 'status done';
+                        window._lastPathJson = fullText;
+                    }
+                );
+            } catch (e) {
+                planStatusEl.textContent = '错误: ' + e.message;
+                planStatusEl.className = 'status err';
+            } finally {
+                btnPlan.disabled = false;
+            }
+        }
+
+        btnPlan.onclick = planStream;
+
+        btnCopy.onclick = () => {
+            const text = planOutputEl.textContent;
+            if (!text) { alert('暂无内容'); return; }
+            navigator.clipboard.writeText(text).then(() => alert('已复制'));
+        };
+
+        btnSave.onclick = async () => {
+            const json = window._lastPathJson || planOutputEl.textContent;
+            if (!json || json.includes('等待规划')) { alert('请先完成规划'); return; }
+            const topic = prompt('请输入路径主题', 'Java 入门') || '未命名';
+            const userId = parseInt(userIdEl.value, 10);
+            if (!userId) { alert('请输入用户 ID'); return; }
+
+            try {
+                const res = await fetch(API + '/learning-path/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pathJson: json, topic, description: '', userId })
+                });
+                const data = await res.json();
+                if (data.code === 0) {
+                    alert('保存成功');
+                    document.getElementById('btnList').click();
+                    if (data.data && data.data.id) {
+                        _selectedPathId = data.data.id;
+                        _selectedUserId = userId;
+                        selectedPathIdEl.textContent = _selectedPathId;
+                    }
+                } else {
+                    alert('保存失败: ' + (data.message || data.code));
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
+            }
+        };
+
+        btnPolish.onclick = async () => {
+            const userPrompt = polishPromptEl.value.trim();
+            const userId = parseInt(polishUserIdEl.value, 10);
+            if (!userPrompt) { alert('请输入修改要求'); return; }
+            if (!userId) { alert('请输入用户 ID'); return; }
+
+            const baseJson = window._selectedPathJson || window._lastPathJson || planOutputEl.textContent;
+            if (!baseJson || String(baseJson).includes('等待规划')) { alert('请先规划或选择一个已有路径'); return; }
+
+            btnPolish.disabled = true;
+            polishOutputEl.textContent = '';
+            polishOutputEl.classList.remove('empty');
+            polishStatusEl.textContent = '正在润色...';
+            polishStatusEl.className = 'status streaming';
+
+            try {
+                await streamTo(
+                    API + '/learning-path/plan/stream/flux',
+                    { userPrompt, currentPathJson: String(baseJson), userId },
+                    (text) => {
+                        polishOutputEl.textContent = text;
+                        polishOutputEl.scrollTop = polishOutputEl.scrollHeight;
+                    },
+                    (fullText) => {
+                        polishStatusEl.textContent = '润色完成';
+                        polishStatusEl.className = 'status done';
+                        window._lastPolishJson = fullText;
+                    }
+                );
+            } catch (e) {
+                polishStatusEl.textContent = '错误: ' + e.message;
+                polishStatusEl.className = 'status err';
+            } finally {
+                btnPolish.disabled = false;
+            }
+        };
+
+        btnUsePolish.onclick = () => {
+            const json = window._lastPolishJson;
+            if (!json) { alert('暂无润色结果'); return; }
+            planOutputEl.textContent = json;
+            planOutputEl.classList.remove('empty');
+            window._lastPathJson = json;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+
+        function tryParseLearningPathJson(text) {
+            if (!text) return null;
+            const s = String(text).trim();
+            if (!s) return null;
+            try {
+                return JSON.parse(s);
+            } catch (e) {
+                // 有些情况下上方是 pretty JSON（依旧可 parse），若仍失败则提示
+                return null;
+            }
+        }
+
+        async function updateSelectedWith(jsonText) {
+            const userId = _selectedUserId || parseInt(userIdEl.value, 10) || parseInt(listUserIdEl.value, 10);
+            if (!userId) { alert('缺少 userId'); return; }
+            if (!_selectedPathId) { alert('请先在列表中选择一个路径（点“查看”）'); return; }
+
+            const obj = tryParseLearningPathJson(jsonText);
+            if (!obj || !obj.nodes) {
+                alert('JSON 解析失败：请确保是 {\"nodes\":[...]} 格式');
+                return;
+            }
+
+            const res = await fetch(API + '/learning-path/' + _selectedPathId + '/json?userId=' + userId, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(obj)
+            });
+            const data = await res.json();
+            if (data.code === 0 && data.data === true) {
+                alert('更新成功');
+                await loadList();
+            } else {
+                alert('更新失败: ' + (data.message || data.code));
+            }
+        }
+
+        btnUpdateSelected.onclick = async () => {
+            const json = window._lastPathJson || planOutputEl.textContent;
+            if (!json) { alert('上方没有可更新的 JSON'); return; }
+            try { await updateSelectedWith(json); } catch (e) { alert(e.message); }
+        };
+
+        btnUpdateWithPolish.onclick = async () => {
+            const json = window._lastPolishJson;
+            if (!json) { alert('暂无润色结果'); return; }
+            try { await updateSelectedWith(json); } catch (e) { alert(e.message); }
+        };
+
+        btnDeleteSelected.onclick = async () => {
+            const userId = _selectedUserId || parseInt(userIdEl.value, 10) || parseInt(listUserIdEl.value, 10);
+            if (!userId) { alert('缺少 userId'); return; }
+            if (!_selectedPathId) { alert('请先选择一个路径'); return; }
+            if (!confirm('确认删除该学习路径？\n' + _selectedPathId)) return;
+
+            const res = await fetch(API + '/learning-path/' + _selectedPathId + '?userId=' + userId, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.code === 0 && data.data === true) {
+                alert('删除成功');
+                _selectedPathId = null;
+                window._selectedPathJson = null;
+                selectedPathIdEl.textContent = '未选择';
+                await loadList();
+            } else {
+                alert('删除失败: ' + (data.message || data.code));
+            }
+        };
+
+        async function loadList() {
+            const userId = parseInt(listUserIdEl.value, 10);
+            if (!userId) { pathListEl.innerHTML = '<p style="color:#888">请输入用户 ID</p>'; return; }
+            try {
+                const res = await fetch(API + '/learning-path/list?userId=' + userId);
+                const data = await res.json();
+                if (data.code !== 0) {
+                    pathListEl.innerHTML = '<p style="color:#c00">' + (data.message || '加载失败') + '</p>';
+                    return;
+                }
+                const list = data.data || [];
+                if (list.length === 0) {
+                    pathListEl.innerHTML = '<p style="color:#888">暂无学习路径</p>';
+                    return;
+                }
+                pathListEl.innerHTML = list.map((p, i) => `
+                    <div class="list-item">
+                        <div>
+                            <span class="topic">${escapeHtml(p.topic || '未命名')}</span>
+                            <div class="meta">${escapeHtml(p.id)} · ${p.createTime || ''}</div>
+                        </div>
+                        <button class="secondary btn-view" data-i="${i}">查看</button>
+                    </div>
+                `).join('');
+                pathListEl.querySelectorAll('.btn-view').forEach(btn => {
+                    const p = list[parseInt(btn.dataset.i, 10)];
+                    btn.onclick = () => viewPath(p.id, userId);
+                });
+            } catch (e) {
+                pathListEl.innerHTML = '<p style="color:#c00">' + e.message + '</p>';
+            }
+        }
+
+        function escapeHtml(s) {
+            if (!s) return '';
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        async function viewPath(pathId, userId) {
+            try {
+                const res = await fetch(API + '/learning-path/' + pathId + '/json?userId=' + userId);
+                const data = await res.json();
+                if (data.code === 0 && data.data) {
+                    planOutputEl.textContent = JSON.stringify(data.data, null, 2);
+                    planOutputEl.classList.remove('empty');
+                    window._lastPathJson = JSON.stringify(data.data);
+                    window._selectedPathJson = JSON.stringify(data.data);
+                    _selectedPathId = pathId;
+                    _selectedUserId = userId;
+                    selectedPathIdEl.textContent = pathId;
+                } else {
+                    alert('获取失败');
+                }
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        btnList.onclick = loadList;
+        loadList();
+    </script>
+</body>
+</html>
