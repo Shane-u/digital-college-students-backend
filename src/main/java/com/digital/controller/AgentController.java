@@ -1,11 +1,11 @@
 package com.digital.controller;
 
 import com.digital.model.CareerPlanState;
+import com.digital.model.dto.agent.AgentCareerStartRequest;
 import com.digital.service.DifyWorkflowService;
 import com.digital.service.WorkflowRuntime;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import jakarta.annotation.Resource;
-import lombok.Data;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.*;
@@ -27,20 +27,13 @@ public class AgentController {
     @Resource
     private WorkflowRuntime runtime;
 
-    @Data
-    public static class StartRequest {
-        private Long userId;
-        private String input;
-        private Map<String, Object> assessmentResult; // 职业测评结果
-    }
-
     /**
      * 启动职业规划工作流（使用 Dify）
      * @param req
      * @return
      */
     @PostMapping("/career/start")
-    public Map<String, Object> start(@RequestBody StartRequest req) {
+    public Map<String, Object> start(@RequestBody AgentCareerStartRequest req) {
         return difyWorkflowService.startWorkflow(
                 req.getUserId(),
                 req.getInput(),

@@ -1,5 +1,6 @@
 package com.digital.service;
 
+import com.huaban.analysis.jieba.JiebaSegmenter;
 import org.neo4j.driver.Driver;
 import org.neo4j.driver.Session;
 import org.neo4j.driver.SessionConfig;
@@ -20,6 +21,8 @@ import java.util.Map;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * Neo4j 闪卡服务
@@ -37,6 +40,59 @@ public class Neo4jFlashCardService {
     @Value("${neo4j.database:}")
     private String defaultDatabase;
 
+    private static final String FLASHCARD_FULLTEXT_INDEX = "flashcard_title_idx";
+
+    private static final JiebaSegmenter JIEBA = new JiebaSegmenter();
+
+    private String getDatabaseName(Long userId) {
+        return defaultDatabase != null && !defaultDatabase.isEmpty()
+                ? defaultDatabase
+                : String.valueOf(userId);
+    }
+
+    private static String normalizeText(String s) {
+        if (s == null) return "";
+        String t = s.trim()
+                .replaceAll("\\s+", " ")
+                .replaceAll("[\\p{Punct}，。；：、（）()【】\\[\\]{}<>《》“”\"'`~!@#$%^&*+=|\\\\/]+", " ")
+                .replaceAll("\\s+", " ")
+                .toLowerCase();
+        // 去括号内容（避免噪声）
+        t = t.replaceAll("\\([^)]*\\)", " ").replaceAll("（[^）]*）", " ");
+        return t.trim();
+    }
+
+    private static boolean isUsefulToken(String token) {
+        if (token == null) return false;
+        String t = token.trim();
+        if (t.isEmpty()) return false;
+        // 英文/数字保留 1+
+        if (t.matches("[a-z0-9]+")) return true;
+        // 中文保留长度>=2（单字噪声太大）
+        if (t.matches("[\\u4e00-\\u9fa5]+")) return t.length() >= 2;
+        // 其他（如 C++）留到上层 query 转义处理；这里长度>=2
+        return t.length() >= 2;
+    }
+
+    private static String buildTitleSearch(String title) {
+        String normalized = normalizeText(title);
+        if (normalized.isEmpty()) {
+            return "";
+        }
+
+        Set<String> tokens = new LinkedHashSet<>();
+        // 1) 结巴分词（Search 模式更适合检索）
+        for (String w : JIEBA.sentenceProcess(normalized)) {
+            if (isUsefulToken(w)) {
+                tokens.add(w);
+            }
+        }
+        // 2) 补充原始 normalized（短语兜底）
+        tokens.add(normalized);
+
+        return String.join(" ", tokens);
+    }
+
     /**
      * 确保用户数据库存在，如果不存在则创建
      * 
@@ -45,9 +101,7 @@ public class Neo4jFlashCardService {
      */
     public void ensureUserDatabaseExists(Long userId) {
         // 使用 userId 作为数据库名，如果配置了默认数据库则使用默认值
-        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty() 
-            ? defaultDatabase 
-            : String.valueOf(userId);
+        String databaseName = getDatabaseName(userId);
         
         ensureDatabaseExists(databaseName);
     }
@@ -120,6 +174,122 @@ public class Neo4jFlashCardService {
         }
     }
 
+    /**
+     * 确保闪卡全文索引存在（用于模糊匹配）
+     */
+    public void ensureFlashcardFulltextIndex(Long userId) {
+        String databaseName = getDatabaseName(userId);
+        ensureDatabaseExists(databaseName);
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            // Neo4j 5.x：CREATE FULLTEXT INDEX ... IF NOT EXISTS
+            String cypher = "CREATE FULLTEXT INDEX `" + FLASHCARD_FULLTEXT_INDEX + "` IF NOT EXISTS " +
+                    "FOR (n:FlashCard) ON EACH [n.titleSearch]";
+            session.run(cypher).consume();
+        } catch (Exception e) {
+            log.error("创建/检查闪卡全文索引失败：userId={}, error={}", userId, e.getMessage(), e);
+            throw new RuntimeException("创建/检查闪卡全文索引失败", e);
+        }
+    }
+
+    /**
+     * 将用户历史闪卡补齐公共 label 与 titleSearch（便于全文索引命中）
+     * 幂等；只在需要匹配时调用。
+     */
+    public void ensureFlashcardSearchFields(Long userId, int limit) {
+        String databaseName = getDatabaseName(userId);
+        ensureDatabaseExists(databaseName);
+
+        String flashCardLabel = "User_" + userId + "_FlashCard";
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            // 1) 公共 label 补齐
+            session.executeWrite(tx -> {
+                String cypher = "MATCH (n:" + flashCardLabel + " {userId: $userId}) " +
+                        "SET n:FlashCard " +
+                        "RETURN count(n) AS cnt";
+                tx.run(cypher, Values.parameters("userId", userId)).consume();
+                return null;
+            });
+
+            // 2) titleSearch 补齐（只处理缺失的，避免全量更新）
+            List<Map<String, Object>> rows = new ArrayList<>();
+            var result = session.run(
+                    "MATCH (n:" + flashCardLabel + " {userId: $userId}) " +
+                            "WHERE n.title IS NOT NULL AND (n.titleSearch IS NULL OR trim(n.titleSearch) = '') " +
+                            "RETURN n.id AS id, n.title AS title " +
+                            "LIMIT $limit",
+                    Values.parameters("userId", userId, "limit", Math.max(1, limit))
+            );
+            while (result.hasNext()) {
+                var r = result.next();
+                String id = r.get("id").isNull() ? null : r.get("id").asString();
+                String title = r.get("title").isNull() ? "" : r.get("title").asString();
+                if (id == null || title.isBlank()) {
+                    continue;
+                }
+                Map<String, Object> row = new HashMap<>();
+                row.put("id", id);
+                row.put("titleSearch", buildTitleSearch(title));
+                rows.add(row);
+            }
+            if (rows.isEmpty()) {
+                return;
+            }
+
+            session.executeWrite(tx -> {
+                String cypher = "UNWIND $rows AS row " +
+                        "MATCH (n:" + flashCardLabel + " {userId: $userId, id: row.id}) " +
+                        "SET n.titleSearch = row.titleSearch " +
+                        "RETURN count(n) AS cnt";
+                tx.run(cypher, Values.parameters("userId", userId, "rows", rows)).consume();
+                return null;
+            });
+        } catch (Exception e) {
+            log.error("补齐闪卡搜索字段失败：userId={}, error={}", userId, e.getMessage(), e);
+            throw new RuntimeException("补齐闪卡搜索字段失败", e);
+        }
+    }
+
+    /**
+     * 全文检索闪卡（返回 id/title/score）
+     */
+    public List<Map<String, Object>> fulltextSearchFlashcards(Long userId, String luceneQuery, int topK) {
+        String databaseName = getDatabaseName(userId);
+        ensureDatabaseExists(databaseName);
+
+        ensureFlashcardSearchFields(userId, 2000);
+        ensureFlashcardFulltextIndex(userId);
+
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            var result = session.run(
+                    "CALL db.index.fulltext.queryNodes($indexName, $q) YIELD node, score " +
+                            "WHERE node.userId = $userId " +
+                            "RETURN node.id AS id, node.title AS title, score AS score " +
+                            "ORDER BY score DESC " +
+                            "LIMIT $topK",
+                    Values.parameters(
+                            "indexName", FLASHCARD_FULLTEXT_INDEX,
+                            "q", luceneQuery,
+                            "userId", userId,
+                            "topK", Math.max(1, topK)
+                    )
+            );
+
+            List<Map<String, Object>> hits = new ArrayList<>();
+            while (result.hasNext()) {
+                var r = result.next();
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("id", r.get("id").isNull() ? null : r.get("id").asString());
+                m.put("title", r.get("title").isNull() ? null : r.get("title").asString());
+                m.put("score", r.get("score").isNull() ? 0D : r.get("score").asDouble());
+                hits.add(m);
+            }
+            return hits;
+        } catch (Exception e) {
+            log.error("全文检索闪卡失败：userId={}, q={}, error={}", userId, luceneQuery, e.getMessage(), e);
+            throw new RuntimeException("全文检索闪卡失败", e);
+        }
+    }
+
 
     /**
      * 保存闪卡到 Neo4j
@@ -165,9 +335,7 @@ public class Neo4jFlashCardService {
         }
 
         // 使用 userId 作为数据库名，如果配置了默认数据库则使用默认值
-        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty() 
-            ? defaultDatabase 
-            : String.valueOf(userId);
+        String databaseName = getDatabaseName(userId);
         
         // 确保用户数据库存在
         ensureDatabaseExists(databaseName);
@@ -206,10 +374,12 @@ public class Neo4jFlashCardService {
                 String lastLevelLabel = "User_" + userId + "_Level" + (levels.length - 1);
                 String lastLevelName = levels[levels.length - 1];
                 String flashCardLabel = "User_" + userId + "_FlashCard";
+                String titleSearch = buildTitleSearch(flashCardTitle);
 
                 String createFlashCardQuery = "MATCH (level:" + lastLevelLabel + " {name: $levelName, userId: $userId}) " +
-                                             "MERGE (card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
+                                             "MERGE (card:FlashCard:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
                                              "SET card.title = $title, " +
+                                             "    card.titleSearch = $titleSearch, " +
                                              "    card.content = $content, " +
                                              "    card.htmlContent = null, " +
                                              "    card.hierarchyPath = $cardHierarchyPath, " +
@@ -223,6 +393,7 @@ public class Neo4jFlashCardService {
                     Values.parameters("levelName", lastLevelName, "userId", userId,
                                     "flashCardId", flashCardId,
                                     "title", flashCardTitle,
+                                    "titleSearch", titleSearch,
                                     "content", flashCardContent,
                                     "cardHierarchyPath", hierarchyPathForCard,
                                     "nextReviewTime", nextReviewTimeMs,
@@ -267,9 +438,7 @@ public class Neo4jFlashCardService {
         }
 
         // 使用 userId 作为数据库名，如果配置了默认数据库则使用默认值
-        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty()
-            ? defaultDatabase
-            : String.valueOf(userId);
+        String databaseName = getDatabaseName(userId);
 
         // 确保用户数据库存在
         ensureDatabaseExists(databaseName);
@@ -370,10 +539,12 @@ public class Neo4jFlashCardService {
 
                 String lastLevelLabel = "User_" + userId + "_Level" + (newLevels.length - 1);
                 String lastLevelName = newLevels[newLevels.length - 1];
+                String titleSearch = buildTitleSearch(flashCardTitle);
 
                 String createFlashCardQuery = "MATCH (level:" + lastLevelLabel + " {name: $levelName, userId: $userId}) " +
-                                             "MERGE (card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
+                                             "MERGE (card:FlashCard:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
                                              "SET card.title = $title, " +
+                                             "    card.titleSearch = $titleSearch, " +
                                              "    card.content = $content, " +
                                              "    card.htmlContent = null, " +
                                              "    card.hierarchyPath = $cardHierarchyPath, " +
@@ -387,6 +558,7 @@ public class Neo4jFlashCardService {
                     Values.parameters("levelName", lastLevelName, "userId", userId,
                                       "flashCardId", flashCardId,
                                       "title", flashCardTitle,
+                                      "titleSearch", titleSearch,
                                       "content", flashCardContent,
                                       "cardHierarchyPath", hierarchyPathForCard,
                                       "nextReviewTime", nextReviewTimeMs,
@@ -408,9 +580,7 @@ public class Neo4jFlashCardService {
 
     public void deleteFlashCardFromNeo4j(Long userId, String flashCardId) {
         // 使用 userId 作为数据库名，如果配置了默认数据库则使用默认值
-        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty() 
-            ? defaultDatabase 
-            : String.valueOf(userId);
+        String databaseName = getDatabaseName(userId);
         
         // 确保用户数据库存在
         ensureDatabaseExists(databaseName);
@@ -455,9 +625,7 @@ public class Neo4jFlashCardService {
                                        String hierarchyPathForCard,
                                        Long nextReviewTimeMs, Integer repetition, Integer difficultyLevel,
                                        Long createTimeMs, Long updatedAtMs) {
-        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty()
-            ? defaultDatabase
-            : String.valueOf(userId);
+        String databaseName = getDatabaseName(userId);
 
         ensureDatabaseExists(databaseName);
 
@@ -465,7 +633,9 @@ public class Neo4jFlashCardService {
             try (Transaction tx = session.beginTransaction()) {
                 String flashCardLabel = "User_" + userId + "_FlashCard";
                 String updateQuery = "MATCH (card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
-                                     "SET card.title = $newTitle, " +
+                                     "SET card:FlashCard, " +
+                                     "    card.title = $newTitle, " +
+                                     "    card.titleSearch = $titleSearch, " +
                                      "    card.content = $newContent, " +
                                      "    card.htmlContent = null, " +
                                      "    card.hierarchyPath = $cardHierarchyPath, " +
@@ -479,6 +649,7 @@ public class Neo4jFlashCardService {
                         "flashCardId", flashCardId,
                         "userId", userId,
                         "newTitle", newTitle,
+                        "titleSearch", buildTitleSearch(newTitle),
                         "newContent", newContent,
                         "cardHierarchyPath", hierarchyPathForCard,
                         "nextReviewTime", nextReviewTimeMs,

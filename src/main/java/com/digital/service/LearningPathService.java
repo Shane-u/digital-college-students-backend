@@ -8,6 +8,7 @@ import com.digital.model.vo.LearningPathGraphVO;
 
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.BooleanSupplier;
 
 /**
  * 孪孪伴学 - 学习路径服务
@@ -23,9 +24,10 @@ public interface LearningPathService {
      * 输出：通过 onChunk 回调逐块推送 JSON 内容
      *
      * @param request 规划请求
+     * @param shouldStop 是否需要终止（前端 terminate / 断开连接时为 true）
      * @param onChunk 每收到一块内容时的回调，(delta, finished)，finished 为 true 表示流结束
      */
-    void planLearningPathStream(LearningPathPlanRequest request, BiConsumer<String, Boolean> onChunk);
+    void planLearningPathStream(LearningPathPlanRequest request, BooleanSupplier shouldStop, BiConsumer<String, Boolean> onChunk);
 
     /**
      * 保存学习路径（Saga：先 Neo4j，再 MySQL）
