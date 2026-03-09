@@ -2,6 +2,7 @@ package com.digital.service.impl;
 
 import com.digital.model.dto.learningpath.LearningPathJson;
 import com.digital.model.dto.learningpath.LearningPathNode;
+import com.digital.model.vo.LearningPathGraphVO;
 import com.digital.service.LearningPathNeo4jService;
 import lombok.extern.slf4j.Slf4j;
 import org.neo4j.driver.Driver;
@@ -208,6 +209,62 @@ public class LearningPathNeo4jServiceImpl implements LearningPathNeo4jService {
         } catch (Exception e) {
             log.error("从 Neo4j 列出学习路径失败：userId={}, error={}", userId, e.getMessage(), e);
             throw new RuntimeException("从 Neo4j 列出学习路径失败", e);
+        }
+    }
+
+    @Override
+    public LearningPathGraphVO getLearningPathGraph(Long userId, String pathId) {
+        LearningPathJson json = getLearningPath(userId, pathId);
+        if (json == null || json.getNodes() == null) {
+            return null;
+        }
+
+        String dbName = getDatabaseName(userId);
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(dbName))) {
+            LearningPathGraphVO vo = new LearningPathGraphVO();
+            vo.setPathId(pathId);
+            vo.setNodes(json.getNodes());
+
+            List<LearningPathGraphVO.Relationship> rels = new ArrayList<>();
+
+            // HAS_NODE: pathId -> root
+            var hasNodeResult = session.run(
+                    "MATCH (lp:LearningPath {userId: $userId, pathId: $pathId})-[:HAS_NODE]->(root:LearningNode) RETURN root.nodeId AS rootId",
+                    Values.parameters("userId", userId, "pathId", pathId)
+            );
+            if (hasNodeResult.hasNext()) {
+                String rootId = hasNodeResult.next().get("rootId").asString();
+                LearningPathGraphVO.Relationship r = new LearningPathGraphVO.Relationship();
+                r.setSourceNodeId(pathId);
+                r.setTargetNodeId(rootId);
+                r.setType("HAS_NODE");
+                rels.add(r);
+            }
+
+            // PARENT_OF
+            for (LearningPathNode node : json.getNodes()) {
+                String parentId = node.getParentNodeId();
+                if (parentId != null && !parentId.isEmpty()) {
+                    LearningPathGraphVO.Relationship r = new LearningPathGraphVO.Relationship();
+                    r.setSourceNodeId(parentId);
+                    r.setTargetNodeId(node.getNodeId());
+                    r.setType("PARENT_OF");
+                    rels.add(r);
+                }
+            }
+
+            vo.setRelationships(rels);
+
+            // topic 从根节点 name 取
+            json.getNodes().stream()
+                    .filter(n -> Boolean.TRUE.equals(n.getIsStart()))
+                    .findFirst()
+                    .ifPresent(root -> vo.setTopic(root.getName()));
+
+            return vo;
+        } catch (Exception e) {
+            log.error("获取学习路径图谱失败：userId={}, pathId={}, error={}", userId, pathId, e.getMessage(), e);
+            throw new RuntimeException("获取学习路径图谱失败", e);
         }
     }
 
