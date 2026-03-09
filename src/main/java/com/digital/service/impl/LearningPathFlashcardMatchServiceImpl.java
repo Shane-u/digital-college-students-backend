@@ -39,10 +39,17 @@ public class LearningPathFlashcardMatchServiceImpl implements LearningPathFlashc
     private static final int DEFAULT_MAX_DESCENDANTS = 200;
     private static final int DEFAULT_MAX_TOKENS = 40;
     private static final int DEFAULT_TOP_K = 100;
-    private static final double DEFAULT_RATIO = 0.35;
+    /**
+     * 默认得分截断比例：取 max(threshold, maxScore * DEFAULT_RATIO)
+     * 提高为 0.6，减小“只有很弱相关性就命中”的误判概率
+     */
+    private static final double DEFAULT_RATIO = 0.60;
 
     private static final Set<String> STOP_WORDS = Set.of(
-            "学习", "基础", "入门", "了解", "掌握", "进阶", "实战", "概述", "总结", "项目", "练习", "复习", "课程", "模块", "章节"
+            // 通用学习类弱词
+            "学习", "基础", "入门", "了解", "掌握", "进阶", "实战", "概述", "总结", "项目", "练习", "复习", "课程", "模块", "章节",
+            // 连接词 / 虚词：避免“io 与 流”“react 与 html”只因为连接词等被误判
+            "与", "和", "及", "或", "以及", "还有", "相关", "有关", "介绍"
     );
 
     private static final Set<Character> LUCENE_SPECIAL_CHARS = Set.of(
@@ -234,6 +241,8 @@ public class LearningPathFlashcardMatchServiceImpl implements LearningPathFlashc
                 .replaceAll("[\\p{Punct}，。；：、（）()【】\\[\\]{}<>《》“”\"'`~!@#$%^&*+=|\\\\/]+", " ")
                 .replaceAll("\\s+", " ")
                 .toLowerCase();
+        // 去掉常见连接词，降低“IO 与 流”与“React 与 HTML”只因“与”等词而相似的概率
+        t = t.replaceAll("\\s*(与|和|及|或|以及)\\s*", " ");
         t = t.replaceAll("\\([^)]*\\)", " ").replaceAll("（[^）]*）", " ");
         return t.trim();
     }
