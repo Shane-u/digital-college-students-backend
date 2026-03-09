@@ -348,6 +348,13 @@
             <version>5.15.0</version>
         </dependency>
 
+        <!-- 中文分词（用于学习路径↔闪卡关键词匹配） -->
+        <dependency>
+            <groupId>com.huaban</groupId>
+            <artifactId>jieba-analysis</artifactId>
+            <version>1.0.2</version>
+        </dependency>
+
     </dependencies>
 
     <build>

@@ -16,6 +16,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -101,6 +102,17 @@ public class SiliconFlowManager {
      * @throws BusinessException 当请求失败时抛出
      */
     public void streamChat(ChatRequest chatRequest, Consumer<StreamChatResponse> onChunk) {
+        streamChat(chatRequest, onChunk, () -> false);
+    }
+
+    /**
+     * 发送流式聊天请求（可终止）
+     *
+     * @param chatRequest 聊天请求对象
+     * @param onChunk 每收到一个数据块时的回调函数
+     * @param shouldStop 当返回 true 时终止流式读取并尽快关闭连接
+     */
+    public void streamChat(ChatRequest chatRequest, Consumer<StreamChatResponse> onChunk, BooleanSupplier shouldStop) {
         try {
             // 确保使用流式模式
             chatRequest.setStream(true);
@@ -137,6 +149,10 @@ public class SiliconFlowManager {
                     StringBuilder dataBuffer = new StringBuilder();
 
                     while ((line = reader.readLine()) != null) {
+                        if (shouldStop != null && shouldStop.getAsBoolean()) {
+                            log.debug("流式请求被终止");
+                            break;
+                        }
                         // SSE格式: data: {...}\n\n
                         if (line.startsWith("data: ")) {
                             String data = line.substring(6); // 去掉 "data: " 前缀

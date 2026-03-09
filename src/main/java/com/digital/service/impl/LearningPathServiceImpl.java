@@ -26,6 +26,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.BiConsumer;
+import java.util.function.BooleanSupplier;
 
 /**
  * 孪孪伴学 - 学习路径服务实现
@@ -87,7 +88,9 @@ public class LearningPathServiceImpl implements LearningPathService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
-    public void planLearningPathStream(LearningPathPlanRequest request, BiConsumer<String, Boolean> onChunk) {
+    public void planLearningPathStream(LearningPathPlanRequest request,
+                                       BooleanSupplier shouldStop,
+                                       BiConsumer<String, Boolean> onChunk) {
         ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR, "请求参数不能为空");
         ThrowUtils.throwIf(StringUtils.isBlank(request.getUserPrompt()), ErrorCode.PARAMS_ERROR, "用户提示词不能为空");
 
@@ -114,7 +117,7 @@ public class LearningPathServiceImpl implements LearningPathService {
             if (streamResponse.isFinished()) {
                 onChunk.accept("", true);
             }
-        });
+        }, shouldStop);
     }
 
     @Override

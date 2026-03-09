@@ -5,11 +5,15 @@ import com.digital.common.ErrorCode;
 import com.digital.common.ResultUtils;
 import com.digital.exception.BusinessException;
 import com.digital.model.dto.learningpath.LearningPathJson;
+import com.digital.model.dto.learningpath.LearningPathFlashcardMatchRequest;
 import com.digital.model.dto.learningpath.LearningPathPlanRequest;
 import com.digital.model.dto.learningpath.LearningPathSaveRequest;
 import com.digital.model.entity.LearningPath;
 import com.digital.model.entity.User;
+import com.digital.model.vo.LearningPathFlashcardMatchVO;
 import com.digital.model.vo.LearningPathGraphVO;
+import com.digital.service.LearningPathChatPersistenceService;
+import com.digital.service.LearningPathFlashcardMatchService;
 import com.digital.service.LearningPathService;
 import com.digital.service.UserService;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +29,7 @@ import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 孪孪伴学 - 学习路径控制器
@@ -41,7 +46,13 @@ public class LearningPathController {
     private LearningPathService learningPathService;
 
     @Resource
+    private LearningPathFlashcardMatchService learningPathFlashcardMatchService;
+
+    @Resource
     private UserService userService;
+
+    @Resource
+    private LearningPathChatPersistenceService learningPathChatPersistenceService;
 
     /**
      * 流式规划学习路径
@@ -56,9 +67,43 @@ public class LearningPathController {
 
         SseEmitter emitter = new SseEmitter(300000L);
 
-        learningPathService.planLearningPathStream(request, (delta, finished) -> {
+        String sessionId = learningPathChatPersistenceService.getOrCreateSession(
+                userId,
+                request.getSessionId(),
+                LearningPathChatPersistenceService.defaultTitleFromPrompt(request.getUserPrompt())
+        );
+        request.setSessionId(sessionId);
+
+        // 先保存用户消息（学习路径规划/修改提示）
+        String userContent = request.getUserPrompt();
+        if (StringUtils.isNotBlank(request.getCurrentPathJson())) {
+            userContent += "\n\n当前学习路径（请在此基础上修改）：\n" + request.getCurrentPathJson();
+        }
+        learningPathChatPersistenceService.saveUserMessage(sessionId, userId, userContent);
+
+        StringBuilder assistantBuffer = new StringBuilder();
+        AtomicBoolean assistantSaved = new AtomicBoolean(false);
+        AtomicBoolean stopped = new AtomicBoolean(false);
+
+        try {
+            emitter.send(SseEmitter.event().name("meta").data(java.util.Map.of("sessionId", sessionId)));
+        } catch (IOException ignored) {
+        }
+
+        Runnable persistOnce = () -> {
+            if (assistantSaved.compareAndSet(false, true)) {
+                String content = assistantBuffer.toString();
+                if (StringUtils.isNotBlank(content)) {
+                    learningPathChatPersistenceService.saveAssistantMessage(sessionId, userId, content);
+                }
+                learningPathChatPersistenceService.touchSession(sessionId);
+            }
+        };
+
+        learningPathService.planLearningPathStream(request, () -> stopped.get(), (delta, finished) -> {
             try {
                 if (!delta.isEmpty()) {
+                    assistantBuffer.append(delta);
                     emitter.send(SseEmitter.event()
                             .data(delta)
                             .name("message"));
@@ -67,17 +112,29 @@ public class LearningPathController {
                     emitter.send(SseEmitter.event()
                             .data("[DONE]")
                             .name("done"));
+                    persistOnce.run();
                     emitter.complete();
                 }
             } catch (IOException e) {
                 log.error("发送流式数据失败", e);
+                persistOnce.run();
                 emitter.completeWithError(e);
             }
         });
 
-        emitter.onError(throwable -> log.error("SseEmitter 错误", throwable));
+        emitter.onError(throwable -> {
+            stopped.set(true);
+            persistOnce.run();
+            log.error("SseEmitter 错误", throwable);
+        });
+        emitter.onCompletion(() -> {
+            stopped.set(true);
+            persistOnce.run();
+        });
         emitter.onTimeout(() -> {
             log.warn("SseEmitter 超时");
+            stopped.set(true);
+            persistOnce.run();
             emitter.complete();
         });
 
@@ -98,27 +155,58 @@ public class LearningPathController {
         Long userId = resolveUserId(request.getUserId(), httpRequest);
         request.setUserId(userId);
 
+        String sessionId = learningPathChatPersistenceService.getOrCreateSession(
+                userId,
+                request.getSessionId(),
+                LearningPathChatPersistenceService.defaultTitleFromPrompt(request.getUserPrompt())
+        );
+        request.setSessionId(sessionId);
+
+        String userContent = request.getUserPrompt();
+        if (StringUtils.isNotBlank(request.getCurrentPathJson())) {
+            userContent += "\n\n当前学习路径（请在此基础上修改）：\n" + request.getCurrentPathJson();
+        }
+        learningPathChatPersistenceService.saveUserMessage(sessionId, userId, userContent);
+
+        StringBuilder assistantBuffer = new StringBuilder();
+        AtomicBoolean assistantSaved = new AtomicBoolean(false);
+
+        Runnable persistOnce = () -> {
+            if (assistantSaved.compareAndSet(false, true)) {
+                String content = assistantBuffer.toString();
+                if (StringUtils.isNotBlank(content)) {
+                    learningPathChatPersistenceService.saveAssistantMessage(sessionId, userId, content);
+                }
+                learningPathChatPersistenceService.touchSession(sessionId);
+            }
+        };
+
         return Flux.<ServerSentEvent<String>>create(sink -> {
             Schedulers.boundedElastic().schedule(() -> {
                 try {
-                    learningPathService.planLearningPathStream(request, (delta, finished) -> {
+                    sink.next(ServerSentEvent.builder("{\"sessionId\":\"" + sessionId + "\"}").event("meta").build());
+                    learningPathService.planLearningPathStream(request, sink::isCancelled, (delta, finished) -> {
                         if (sink.isCancelled()) {
                             return;
                         }
                         if (StringUtils.isNotEmpty(delta)) {
+                            assistantBuffer.append(delta);
                             sink.next(ServerSentEvent.builder(delta).event("message").build());
                         }
                         if (finished) {
                             sink.next(ServerSentEvent.builder("[DONE]").event("done").build());
+                            persistOnce.run();
                             sink.complete();
                         }
                     });
                 } catch (Exception e) {
                     log.error("学习路径流式规划失败", e);
+                    persistOnce.run();
                     sink.error(e);
                 }
             });
-        }).publishOn(Schedulers.boundedElastic());
+        }).doFinally(signalType -> persistOnce.run())
+          .publishOn(Schedulers.boundedElastic());
     }
 
     /**
@@ -174,6 +262,23 @@ public class LearningPathController {
             return new BaseResponse<>(ErrorCode.NOT_FOUND_ERROR.getCode(), null, "学习路径不存在");
         }
         return ResultUtils.success(graph);
+    }
+
+    /**
+     * 点击学习路径节点 → 匹配闪卡图谱（Neo4j Fulltext + threshold/TopK）
+     * 返回命中 flashcardIds 供前端点亮，未命中置灰
+     */
+    @PostMapping("/{pathId}/flashcard/match")
+    public BaseResponse<LearningPathFlashcardMatchVO> matchFlashcards(@PathVariable String pathId,
+                                                                      @RequestParam(required = false) Long userId,
+                                                                      @RequestBody LearningPathFlashcardMatchRequest request,
+                                                                      HttpServletRequest httpRequest) {
+        Long resolvedUserId = resolveUserId(userId, httpRequest);
+        LearningPathFlashcardMatchVO vo = learningPathFlashcardMatchService.matchFlashcards(resolvedUserId, pathId, request);
+        if (vo == null) {
+            return new BaseResponse<>(ErrorCode.NOT_FOUND_ERROR.getCode(), null, "学习路径不存在");
+        }
+        return ResultUtils.success(vo);
     }
 
     /**
