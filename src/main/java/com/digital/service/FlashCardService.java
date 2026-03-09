@@ -115,4 +115,13 @@ public interface FlashCardService extends IService<FlashCard> {
      * @return 是否删除成功
      */
     boolean deleteTempFlashCard(Long userId, String tempFlashCardId);
+
+    /**
+     * 查询临时闪卡还剩多少天过期（向上取整的天数）
+     *
+     * @param userId         用户ID
+     * @param tempFlashCardId 临时闪卡ID（Redis 中的 key）
+     * @return 剩余过期天数；如果已过期或不存在应在实现中抛出业务异常
+     */
+    Long getTempFlashCardExpirationDays(Long userId, String tempFlashCardId);
 }
