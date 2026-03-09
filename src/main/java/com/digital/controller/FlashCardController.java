@@ -184,6 +184,21 @@ public class FlashCardController {
     }
 
     /**
+     * 查询单个临时闪卡的剩余过期天数
+     * 用于前端展示例如「7天后过期」
+     */
+    @GetMapping("/temp/expiration")
+    public BaseResponse<Long> getTempFlashCardExpiration(@org.springframework.web.bind.annotation.RequestParam("id") String tempFlashCardId,
+                                                         HttpServletRequest httpServletRequest) {
+        if (StringUtils.isBlank(tempFlashCardId)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+        }
+        User loginUser = userService.getLoginUser(httpServletRequest);
+        Long days = flashCardService.getTempFlashCardExpirationDays(loginUser.getId(), tempFlashCardId);
+        return ResultUtils.success(days);
+    }
+
+    /**
      * 确认保存闪卡到终库
      * @param request 包含临时闪卡ID和层级标签路径的请求体
      * @param httpServletRequest HttpServletRequest

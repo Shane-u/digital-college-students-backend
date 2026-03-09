@@ -601,6 +601,26 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
     }
 
     @Override
+    public Long getTempFlashCardExpirationDays(Long userId, String tempFlashCardId) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(tempFlashCardId), ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
+
+        // 校验临时闪卡是否存在且属于当前用户
+        FlashCard flashCard = (FlashCard) redisTemplate.opsForValue().get(tempFlashCardId);
+        ThrowUtils.throwIf(flashCard == null, ErrorCode.NOT_FOUND_ERROR, "临时闪卡不存在或已过期");
+        ThrowUtils.throwIf(!userId.equals(flashCard.getUserId()), ErrorCode.FORBIDDEN_ERROR, "无权限查看该闪卡过期时间");
+
+        Long expireSeconds = redisTemplate.getExpire(tempFlashCardId, TimeUnit.SECONDS);
+        if (expireSeconds == null || expireSeconds <= 0) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "临时闪卡不存在或已过期");
+        }
+
+        // 向上取整为“还剩多少天”
+        long days = (expireSeconds + 86400 - 1) / 86400;
+        return days;
+    }
+
+    @Override
     public boolean updateTempFlashCard(Long userId, FlashCardUpdateRequest request) {
         ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户ID不能为空");
         ThrowUtils.throwIf(StringUtils.isBlank(request.getId()), ErrorCode.PARAMS_ERROR, "闪卡ID不能为空");
