@@ -9,6 +9,7 @@ import com.digital.model.dto.learningpath.LearningPathPlanRequest;
 import com.digital.model.dto.learningpath.LearningPathSaveRequest;
 import com.digital.model.entity.LearningPath;
 import com.digital.model.entity.User;
+import com.digital.model.vo.LearningPathGraphVO;
 import com.digital.service.LearningPathService;
 import com.digital.service.UserService;
 import lombok.extern.slf4j.Slf4j;
@@ -158,6 +159,21 @@ public class LearningPathController {
             return new BaseResponse<>(ErrorCode.NOT_FOUND_ERROR.getCode(), null, "学习路径不存在");
         }
         return ResultUtils.success(path);
+    }
+
+    /**
+     * 获取学习路径图谱（节点 + 关系），供前端展示 Neo4j 图
+     */
+    @GetMapping("/{pathId}/graph")
+    public BaseResponse<LearningPathGraphVO> getPathGraph(@PathVariable String pathId,
+                                                          @RequestParam(required = false) Long userId,
+                                                          HttpServletRequest httpRequest) {
+        Long resolvedUserId = resolveUserId(userId, httpRequest);
+        LearningPathGraphVO graph = learningPathService.getLearningPathGraph(resolvedUserId, pathId);
+        if (graph == null) {
+            return new BaseResponse<>(ErrorCode.NOT_FOUND_ERROR.getCode(), null, "学习路径不存在");
+        }
+        return ResultUtils.success(graph);
     }
 
     /**

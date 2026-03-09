@@ -2,6 +2,7 @@ package com.digital.service;
 
 import com.digital.model.dto.learningpath.LearningPathJson;
 import com.digital.model.dto.learningpath.LearningPathNode;
+import com.digital.model.vo.LearningPathGraphVO;
 
 import java.util.List;
 
@@ -58,4 +59,13 @@ public interface LearningPathNeo4jService {
      * @return pathId 列表
      */
     List<String> listPathIds(Long userId);
+
+    /**
+     * 获取学习路径图谱（所有节点 + 关系），供前端展示 Neo4j 图
+     *
+     * @param userId 用户 ID
+     * @param pathId 路径 ID
+     * @return 图谱 VO（nodes + relationships），不存在则返回 null
+     */
+    LearningPathGraphVO getLearningPathGraph(Long userId, String pathId);
 }

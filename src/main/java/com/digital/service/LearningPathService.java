@@ -4,6 +4,7 @@ import com.digital.model.dto.learningpath.LearningPathPlanRequest;
 import com.digital.model.dto.learningpath.LearningPathSaveRequest;
 import com.digital.model.dto.learningpath.LearningPathJson;
 import com.digital.model.entity.LearningPath;
+import com.digital.model.vo.LearningPathGraphVO;
 
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -78,4 +79,13 @@ public interface LearningPathService {
      * @return 是否成功
      */
     boolean deleteLearningPath(Long userId, String pathId);
+
+    /**
+     * 获取学习路径图谱（所有节点 + 关系），供前端展示 Neo4j 图
+     *
+     * @param userId 用户 ID
+     * @param pathId 路径 ID
+     * @return 图谱 VO，路径不存在或不属于当前用户则返回 null
+     */
+    LearningPathGraphVO getLearningPathGraph(Long userId, String pathId);
 }

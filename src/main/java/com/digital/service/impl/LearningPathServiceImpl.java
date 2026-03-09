@@ -10,6 +10,7 @@ import com.digital.model.dto.learningpath.LearningPathJson;
 import com.digital.model.dto.learningpath.LearningPathPlanRequest;
 import com.digital.model.dto.learningpath.LearningPathSaveRequest;
 import com.digital.model.entity.LearningPath;
+import com.digital.model.vo.LearningPathGraphVO;
 import com.digital.mapper.LearningPathMapper;
 import com.digital.service.LearningPathNeo4jService;
 import com.digital.service.LearningPathService;
@@ -290,5 +291,17 @@ public class LearningPathServiceImpl implements LearningPathService {
             }
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "删除学习路径失败：" + e.getMessage());
         }
+    }
+
+    @Override
+    public LearningPathGraphVO getLearningPathGraph(Long userId, String pathId) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户 ID 不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(pathId), ErrorCode.PARAMS_ERROR, "路径 ID 不能为空");
+
+        LearningPath path = getById(userId, pathId);
+        if (path == null) {
+            return null;
+        }
+        return learningPathNeo4jService.getLearningPathGraph(userId, pathId);
     }
 }
