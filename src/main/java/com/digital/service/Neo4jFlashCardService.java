@@ -496,6 +496,107 @@ public class Neo4jFlashCardService {
         }
     }
 
+    /**
+     * 更新指定闪卡节点的点亮状态及测试信息。
+     *
+     * @param userId        用户 ID
+     * @param nodeId        闪卡节点 ID（与 flashCardId 一致）
+     * @param litStatus     是否点亮
+     * @param score         测试得分
+     * @param difficulty       点亮难度 easy/medium/hard
+     * @param testUpdateTimeMs 最新测试时间
+     */
+    public void updateFlashCardLitStatus(Long userId,
+                                         String nodeId,
+                                         boolean litStatus,
+                                         int score,
+                                         String difficulty,
+                                         Long testUpdateTimeMs) {
+        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty()
+            ? defaultDatabase
+            : String.valueOf(userId);
+
+        ensureDatabaseExists(databaseName);
+
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            try (Transaction tx = session.beginTransaction()) {
+                String flashCardLabel = "User_" + userId + "_FlashCard";
+                String cypher = "MATCH (card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
+                        "SET card.litStatus = $litStatus, " +
+                        "    card.litScore = $litScore, " +
+                        "    card.litDifficulty = $litDifficulty, " +
+                        "    card.litProgress = $litProgress, " +
+                        "    card.testUpdateTime = $testUpdateTime " +
+                        "RETURN card";
+                tx.run(cypher, Values.parameters(
+                        "flashCardId", nodeId,
+                        "userId", userId,
+                        "litStatus", litStatus,
+                        "litScore", score,
+                        "litDifficulty", difficulty,
+                        "litProgress", Math.max(0, Math.min(score, 100)),
+                        "testUpdateTime", testUpdateTimeMs
+                ));
+                tx.commit();
+                log.info("更新闪卡点亮状态成功：userId={}, nodeId={}, litStatus={}, score={}",
+                        userId, nodeId, litStatus, score);
+            }
+        } catch (Exception e) {
+            log.error("更新闪卡点亮状态失败：userId={}, nodeId={}, error={}",
+                    userId, nodeId, e.getMessage(), e);
+            throw new RuntimeException("更新闪卡点亮状态失败", e);
+        }
+    }
+
+    /**
+     * 从某个叶子闪卡开始，自底向上更新其所有父节点（层级节点和根节点）的进度和点亮状态。
+     * 规则：
+     * - parent.litProgress = 已点亮子闪卡数量 / 该父节点下所有子闪卡数量 * 100
+     * - parent.litStatus = litProgress >= 80 时为 true，否则为 false
+     */
+    public void updateParentLitProgress(Long userId, String flashCardId) {
+        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty()
+            ? defaultDatabase
+            : String.valueOf(userId);
+
+        ensureDatabaseExists(databaseName);
+
+        String rootLabel = "User_" + userId + "_Root";
+        String level1Label = "User_" + userId + "_Level1";
+        String level2Label = "User_" + userId + "_Level2";
+        String level3Label = "User_" + userId + "_Level3";
+        String flashCardLabel = "User_" + userId + "_FlashCard";
+
+        // 说明：
+        // 1. 先找到从任意父节点到当前闪卡的路径上的所有父节点（Root / Level1-3）
+        // 2. 对这些父节点分别统计其子树下所有闪卡的总数与已点亮数量
+        // 3. 计算进度并回写到父节点属性上
+        String cypher =
+                "MATCH (card:" + flashCardLabel + " {id: $flashCardId, userId: $userId}) " +
+                "MATCH (parent)-[:LINK_TO*1..4]->(card) " +
+                "WHERE (parent:" + rootLabel + " OR parent:" + level1Label +
+                " OR parent:" + level2Label + " OR parent:" + level3Label + ") " +
+                "WITH DISTINCT parent " +
+                "MATCH (parent)-[:LINK_TO*1..4]->(child:" + flashCardLabel + " {userId: $userId}) " +
+                "WITH parent, count(child) AS total, " +
+                "     count(CASE WHEN child.litStatus = true THEN 1 END) AS lit " +
+                "SET parent.litProgress = CASE WHEN total = 0 THEN 0 ELSE toInteger(100.0 * lit / total) END, " +
+                "    parent.litStatus = CASE WHEN total = 0 THEN false ELSE (100.0 * lit / total) >= 80 END " +
+                "RETURN parent";
+
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            session.run(cypher, Values.parameters(
+                    "userId", userId,
+                    "flashCardId", flashCardId
+            )).consume();
+            log.info("已更新父节点点亮进度：userId={}, flashCardId={}", userId, flashCardId);
+        } catch (Exception e) {
+            log.error("更新父节点点亮进度失败：userId={}, flashCardId={}, error={}",
+                    userId, flashCardId, e.getMessage(), e);
+            // 不抛出运行时异常，避免影响主流程，仅记录日志
+        }
+    }
+
     public void deleteFlashCardHierarchyFromNeo4j(Long userId, String hierarchyPath) {
         if (hierarchyPath == null || hierarchyPath.trim().isEmpty()) {
             throw new IllegalArgumentException("层级路径不能为空");
