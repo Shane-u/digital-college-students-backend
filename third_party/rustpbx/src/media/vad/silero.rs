@@ -30,12 +30,18 @@ impl SileroVad {
         };
 
         // Create new session instance
-        let session = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level3)?
-            .with_intra_threads(1)?
-            .with_inter_threads(1)?
-            .with_log_level(ort::logging::LogLevel::Warning)?
-            .commit_from_memory(MODEL)?;
+        let session = Session::builder()
+            .map_err(|e| anyhow::anyhow!("Failed to create session builder: {}", e))?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|e| anyhow::anyhow!("Failed to set optimization level: {}", e))?
+            .with_intra_threads(1)
+            .map_err(|e| anyhow::anyhow!("Failed to set intra threads: {}", e))?
+            .with_inter_threads(1)
+            .map_err(|e| anyhow::anyhow!("Failed to set inter threads: {}", e))?
+            .with_log_level(ort::logging::LogLevel::Warning)
+            .map_err(|e| anyhow::anyhow!("Failed to set log level: {}", e))?
+            .commit_from_memory(MODEL)
+            .map_err(|e| anyhow::anyhow!("Failed to load model: {}", e))?;
 
         Ok(Self {
             session,

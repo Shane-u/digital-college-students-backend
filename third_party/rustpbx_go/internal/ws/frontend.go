@@ -1,12 +1,16 @@
 package ws
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"pbx_back_end"
 	"pbx_back_end/internal/handler"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,11 +33,16 @@ type FrontendServer struct {
 	codec          string                      // shane: codec for audio stream
 	asrOption      *pbx_back_end.ASROption
 	ttsOption      *pbx_back_end.TTSOption
+	javaBaseURL    string
+	javaToken      string
+	currentSessionId string
+	currentUserId    int64
+	currentQuestionId string
 	mu             sync.Mutex // shane: solve the concurrent write problem
 	writeMu        sync.Mutex // shane: 专门用于保护 WebSocket 写入操作的锁
 }
 
-func NewFrontendServer(llm *handler.LLMHandler, siliconFlowLLM *handler.SiliconFlowHandler, backendConn *websocket.Conn, backendServer *BackendServer, codec string, asrOption *pbx_back_end.ASROption, ttsOption *pbx_back_end.TTSOption) *FrontendServer {
+func NewFrontendServer(llm *handler.LLMHandler, siliconFlowLLM *handler.SiliconFlowHandler, backendConn *websocket.Conn, backendServer *BackendServer, codec string, asrOption *pbx_back_end.ASROption, ttsOption *pbx_back_end.TTSOption, javaBaseURL string, javaToken string) *FrontendServer {
 	// func NewFrontendServer(llm *handler.LLMHandler, siliconFlowLLM *handler.SiliconFlowHandler, codec string, asrOption *pbx_back_end.ASROption, ttsOption *pbx_back_end.TTSOption) *FrontendServer {
 	return &FrontendServer{
 		upgrader: websocket.Upgrader{
@@ -47,6 +56,8 @@ func NewFrontendServer(llm *handler.LLMHandler, siliconFlowLLM *handler.SiliconF
 		codec:          codec,
 		asrOption:      asrOption,
 		ttsOption:      ttsOption,
+		javaBaseURL:    strings.TrimRight(javaBaseURL, "/"),
+		javaToken:      javaToken,
 	}
 }
 
@@ -61,6 +72,11 @@ func (s *FrontendServer) Start(r *gin.Engine, port string) {
 		s.handleWebSocket2(c.Writer, c.Request)
 	})
 
+	// AI interview dedicated realtime voice WS
+	r.GET("/ws/ai-interview", func(c *gin.Context) {
+		s.handleAiInterviewWS(c)
+	})
+
 	// shane: 监听后端消息
 	if s.backendConn != nil {
 		go s.receiveBackendMessages()
@@ -72,6 +88,142 @@ func (s *FrontendServer) Start(r *gin.Engine, port string) {
 		}
 	}() // shane: 开协程防止阻塞
 	logrus.Infof("Connected to the front end! Serve on %s", port)
+}
+
+type javaBaseResponse[T any] struct {
+	Code    int    `json:"code"`
+	Data    T      `json:"data"`
+	Message string `json:"message"`
+}
+
+type javaInternalAuthData struct {
+	UserID   int64  `json:"userId"`
+	UserRole string `json:"userRole"`
+}
+
+func (s *FrontendServer) authorizeByJavaSession(r *http.Request) (*javaInternalAuthData, int, string) {
+	if s.javaBaseURL == "" || s.javaToken == "" {
+		return nil, http.StatusForbidden, "java auth not configured"
+	}
+
+	cookie := r.Header.Get("Cookie")
+	if strings.TrimSpace(cookie) == "" {
+		return nil, http.StatusUnauthorized, "missing cookie"
+	}
+
+	url := s.javaBaseURL + "/internal/auth/session"
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, http.StatusInternalServerError, "create auth request failed"
+	}
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set("X-Internal-Token", s.javaToken)
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, http.StatusBadGateway, "java auth request failed"
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var parsed javaBaseResponse[javaInternalAuthData]
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, http.StatusBadGateway, "java auth response parse failed"
+	}
+	if parsed.Code != 0 || parsed.Data.UserID <= 0 {
+		return nil, http.StatusUnauthorized, "not logged in"
+	}
+	return &parsed.Data, 0, ""
+}
+
+func (s *FrontendServer) handleAiInterviewWS(c *gin.Context) {
+	sessionID := c.Query("sessionId")
+	if strings.TrimSpace(sessionID) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 40000, "message": "missing sessionId"})
+		return
+	}
+
+	// 支持两种模式：
+	// 1) 本地 / 调试环境：通过 query userId 直接透传用户身份（不依赖 Java 会话）
+	// 2) 生产：无 userId 时，通过 Java Session 做鉴权
+	var authData *javaInternalAuthData
+	userIDStr := c.Query("userId")
+	if strings.TrimSpace(userIDStr) != "" {
+		if uid, err := strconv.ParseInt(userIDStr, 10, 64); err == nil && uid > 0 {
+			authData = &javaInternalAuthData{
+				UserID:   uid,
+				UserRole: "user",
+			}
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 40000, "message": "invalid userId"})
+			return
+		}
+	} else {
+		var status int
+		var msg string
+		authData, status, msg = s.authorizeByJavaSession(c.Request)
+		if status != 0 {
+			c.JSON(status, gin.H{"code": status, "message": msg})
+			return
+		}
+	}
+
+	// Upgrade to WebSocket
+	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		logrus.Error("Upgrade Connection Failed:", err)
+		return
+	}
+
+	// store as realtime conn (MVP: single active realtime session)
+	s.mu.Lock()
+	s.clients[conn] = true
+	s.RealTimeConn = conn
+	s.currentSessionId = sessionID
+	s.currentUserId = authData.UserID
+	remoteAddr := conn.RemoteAddr().String()
+	s.mu.Unlock()
+
+	logrus.Infof("ai-interview ws connected: remote=%s userId=%d sessionId=%s role=%s",
+		remoteAddr, authData.UserID, sessionID, authData.UserRole)
+
+	defer func() {
+		// Best-effort hangup to avoid orphan calls when browser closes without sending command
+		if s.backendConn != nil {
+			hangupCmd := pbx_back_end.HangupCommand{
+				Command:   "hangup",
+				Reason:    "ws_closed",
+				Initiator: "caller",
+			}
+			if cmdBytes, err := json.Marshal(hangupCmd); err == nil {
+				_ = s.backendConn.WriteMessage(websocket.TextMessage, cmdBytes)
+			}
+		}
+
+		conn.Close()
+		s.mu.Lock()
+		delete(s.clients, conn)
+		if s.RealTimeConn == conn {
+			s.RealTimeConn = nil
+		}
+		s.mu.Unlock()
+		logrus.Info("ai-interview ws connection closed")
+	}()
+
+	// Immediately notify frontend about binding info (optional)
+	bindEvent := map[string]interface{}{
+		"event":     "aiInterviewBound",
+		"userId":    authData.UserID,
+		"sessionId": sessionID,
+	}
+	if eventBytes, err := json.Marshal(bindEvent); err == nil {
+		_ = conn.WriteMessage(websocket.TextMessage, eventBytes)
+	}
+
+	done := make(chan struct{})
+	go s.ReceiveRealTimeMessage(conn, done)
+	<-done
 }
 
 // safeWriteToRealTimeConn 线程安全地向 RealTimeConn 写入消息
@@ -124,6 +276,151 @@ func (s *FrontendServer) safeWriteToRealTimeConn(messageType int, data []byte) e
 	}
 	logrus.Info("safeWriteToRealTimeConn: Message written successfully to RealTimeConn")
 	return nil
+}
+
+// sendTextAnswerToJava 将最终 ASR 文本作为回答上报到 Java AI 面试后端
+func (s *FrontendServer) sendTextAnswerToJava(text string) {
+	s.mu.Lock()
+	sessionId := s.currentSessionId
+	userId := s.currentUserId
+	questionId := s.currentQuestionId
+	baseURL := s.javaBaseURL
+	token := s.javaToken
+	s.mu.Unlock()
+
+	if baseURL == "" || token == "" || sessionId == "" || userId == 0 || questionId == "" {
+		logrus.Warnf("sendTextAnswerToJava: missing context baseURL=%s token?%v sessionId=%s userId=%d questionId=%s",
+			baseURL, token != "", sessionId, userId, questionId)
+		return
+	}
+
+	url := fmt.Sprintf("%s/ai-interview/sessions/%s/answers/text?userId=%d",
+		baseURL, sessionId, userId)
+
+	payload := map[string]interface{}{
+		"questionId":      questionId,
+		"textAnswer":      text,
+		"durationSeconds": nil,
+		"asrConfidence":   nil,
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		logrus.WithError(err).Error("sendTextAnswerToJava: build request failed")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-Token", token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		logrus.WithError(err).Error("sendTextAnswerToJava: request failed")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		logrus.Errorf("sendTextAnswerToJava: non-200 status=%d body=%s", resp.StatusCode, string(respBody))
+		return
+	}
+
+	logrus.Info("sendTextAnswerToJava: success")
+}
+
+// sendAssistantMessageToJava 将 AI 回复持久化到 Java MongoDB（面试对话记录）
+func (s *FrontendServer) sendAssistantMessageToJava(content string) {
+	s.mu.Lock()
+	sessionId := s.currentSessionId
+	userId := s.currentUserId
+	baseURL := s.javaBaseURL
+	token := s.javaToken
+	s.mu.Unlock()
+
+	if baseURL == "" || token == "" || sessionId == "" || userId == 0 {
+		return
+	}
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+
+	url := fmt.Sprintf("%s/internal/ai-interview/sessions/%s/chat", baseURL, sessionId)
+	payload := map[string]interface{}{
+		"userId":  userId,
+		"role":    "assistant",
+		"content": content,
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		logrus.WithError(err).Error("sendAssistantMessageToJava: build request failed")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-Token", token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		logrus.WithError(err).Error("sendAssistantMessageToJava: request failed")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		logrus.Errorf("sendAssistantMessageToJava: non-200 status=%d body=%s", resp.StatusCode, string(respBody))
+		return
+	}
+	logrus.Info("sendAssistantMessageToJava: success")
+}
+
+// sendUserChatToJava 将实时语音识别到的用户发言写入 Java MongoDB（不依赖 questionId/答案上报）
+func (s *FrontendServer) sendUserChatToJava(content string) {
+	s.mu.Lock()
+	sessionId := s.currentSessionId
+	userId := s.currentUserId
+	baseURL := s.javaBaseURL
+	token := s.javaToken
+	s.mu.Unlock()
+
+	if baseURL == "" || token == "" || sessionId == "" || userId == 0 {
+		return
+	}
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+
+	url := fmt.Sprintf("%s/internal/ai-interview/sessions/%s/chat", baseURL, sessionId)
+	payload := map[string]interface{}{
+		"userId":  userId,
+		"role":    "user",
+		"content": content,
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		logrus.WithError(err).Error("sendUserChatToJava: build request failed")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-Token", token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		logrus.WithError(err).Error("sendUserChatToJava: request failed")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		logrus.Errorf("sendUserChatToJava: non-200 status=%d body=%s", resp.StatusCode, string(respBody))
+		return
+	}
+	logrus.Info("sendUserChatToJava: success")
 }
 
 // shane: 处理前端WebSocket连接
@@ -239,15 +536,25 @@ func (s *FrontendServer) ReceiveRealTimeMessage(conn *websocket.Conn, done chan 
 		if msgType == websocket.TextMessage {
 			// shane: parse message
 			var frontendEvent struct {
-				Event     string          `json:"event"`
-				Sdp       string          `json:"sdp"`
-				Candidate json.RawMessage `json:"candidate"`
-				Command   string          `json:"command"`
-				Reason    string          `json:"reason"`
-				Initiator string          `json:"initiator"`
+				Event      string          `json:"event"`
+				Sdp        string          `json:"sdp"`
+				Candidate  json.RawMessage `json:"candidate"`
+				Command    string          `json:"command"`
+				Reason     string          `json:"reason"`
+				Initiator  string          `json:"initiator"`
+				QuestionId string          `json:"questionId"`
 			}
 			if err := json.Unmarshal(msg, &frontendEvent); err != nil {
 				logrus.Error("parse front end message failed:", err)
+				continue
+			}
+
+			// bind current question for realtime ASR -> Java 上传文本答案
+			if frontendEvent.Event == "bindQuestion" && frontendEvent.QuestionId != "" {
+				s.mu.Lock()
+				s.currentQuestionId = frontendEvent.QuestionId
+				s.mu.Unlock()
+				logrus.Infof("bindQuestion: questionId=%s", frontendEvent.QuestionId)
 				continue
 			}
 
@@ -410,6 +717,12 @@ func (s *FrontendServer) receiveBackendMessages() {
 			if event.Event == "asrFinal" && event.Text != "" {
 				logrus.Infof("received ASR response: %s", event.Text)
 
+				// 实时语音：无论是否绑定题目，都先把用户发言写入 MongoDB（用于报告分析）
+				go s.sendUserChatToJava(event.Text)
+
+				// 若已绑定题目，则把最终 ASR 文本同步给 Java 作为“本题回答”（用于评分 + 结构化 Q&A）
+				go s.sendTextAnswerToJava(event.Text)
+
 				// shane: use LLM to handle ASR result
 				if s.siliconFlowLLM != nil {
 					IsStreaming := true
@@ -499,12 +812,31 @@ func (s *FrontendServer) handleASRWithStream(asrText string) {
 		return nil
 	}
 
+	// 如果用户说的是“下一题 / 下一个问题”等，则认为是控制语句，不再围绕当前问题深挖
+	if strings.Contains(asrText, "下一题") || strings.Contains(asrText, "下一个问题") {
+		logrus.Info("detect next-question command in ASR text, skip LLM")
+		cannedReply := "好的，我们看下一道题。"
+		_ = ttsCallback(cannedReply, fmt.Sprintf("sf-%d", time.Now().UnixNano()), false)
+		go s.sendAssistantMessageToJava(cannedReply)
+		return
+	}
+
+	// 构造面试官专用 prompt：在通用对话前拼上 interviewPrompt 和当前回答
+	userMsg := asrText
+	if s.siliconFlowLLM != nil {
+		if ip := s.siliconFlowLLM.GetInterviewPrompt(); ip != "" {
+			userMsg = ip + "\n\n候选人本轮回答：" + asrText
+		}
+	}
+
 	// shane: use streaming query
-	response, err := s.siliconFlowLLM.QueryStream(asrText, ttsCallback)
+	response, err := s.siliconFlowLLM.QueryStream(userMsg, ttsCallback)
 	if err != nil {
 		logrus.Error("LLM handle ASR result failed:", err)
 	} else {
 		logrus.Infof("LLM stream response completed: %s", response)
+		// 持久化 AI 回复到 Java MongoDB，供报告分析使用
+		go s.sendAssistantMessageToJava(response)
 		// shane: send final llm response to frontend - 使用线程安全的写入方法
 		finalEvent := map[string]interface{}{
 			"event": "llmFinal",

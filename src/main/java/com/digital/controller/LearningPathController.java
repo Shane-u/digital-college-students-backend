@@ -16,7 +16,6 @@ import com.digital.service.LearningPathChatPersistenceService;
 import com.digital.service.LearningPathFlashcardMatchService;
 import com.digital.service.LearningPathService;
 import com.digital.service.UserService;
-import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -39,8 +38,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @RestController
 @RequestMapping("/learning-path")
-@Slf4j
 public class LearningPathController {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LearningPathController.class);
 
     @Resource
     private LearningPathService learningPathService;

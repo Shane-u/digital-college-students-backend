@@ -1,7 +1,5 @@
 package com.digital.model.dto.learningpath;
 
-import lombok.Data;
-
 import java.io.Serializable;
 
 /**
@@ -10,7 +8,6 @@ import java.io.Serializable;
  *
  * @author Shane
  */
-@Data
 public class LearningPathPlanRequest implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -35,4 +32,36 @@ public class LearningPathPlanRequest implements Serializable {
      * 用户 ID（可选，若未登录可从 session 获取）
      */
     private Long userId;
+
+    public String getUserPrompt() {
+        return userPrompt;
+    }
+
+    public void setUserPrompt(String userPrompt) {
+        this.userPrompt = userPrompt;
+    }
+
+    public String getCurrentPathJson() {
+        return currentPathJson;
+    }
+
+    public void setCurrentPathJson(String currentPathJson) {
+        this.currentPathJson = currentPathJson;
+    }
+
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    public void setSessionId(String sessionId) {
+        this.sessionId = sessionId;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
+    }
 }
