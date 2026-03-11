@@ -1,8 +1,6 @@
 package com.digital.service.aiinterview.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.digital.common.ErrorCode;
-import com.digital.exception.ThrowUtils;
 import com.digital.mapper.ResumeAnalysisMapper;
 import com.digital.model.entity.CandidateResume;
 import com.digital.model.entity.ResumeAnalysis;
@@ -28,15 +26,14 @@ public class ResumeAnalysisServiceImpl implements ResumeAnalysisService {
         CandidateResume resume = resumeService.getResumeEntity(userId, resumeId);
 
         // 先查缓存（同 user/resume/targetRole/targetLevel）
+        String normalizedTargetRole = StringUtils.defaultString(targetRole);
+        String normalizedTargetLevel = StringUtils.defaultString(targetLevel);
         QueryWrapper<ResumeAnalysis> qw = new QueryWrapper<>();
         qw.eq("userId", userId).eq("resumeId", resumeId).eq("isDelete", 0);
-        if (StringUtils.isNotBlank(targetRole)) {
-            qw.eq("targetRole", targetRole);
-        }
-        if (StringUtils.isNotBlank(targetLevel)) {
-            qw.eq("targetLevel", targetLevel);
-        }
-        ResumeAnalysis existing = analysisMapper.selectOne(qw);
+        qw.eq("targetRole", normalizedTargetRole).eq("targetLevel", normalizedTargetLevel);
+        // 兼容历史数据可能存在重复：取最新一条
+        ResumeAnalysis existing = analysisMapper.selectList(qw.orderByDesc("id").last("limit 1"))
+                .stream().findFirst().orElse(null);
         if (existing != null && StringUtils.isNotBlank(existing.getAnalysisJson())) {
             ResumeAnalysisVO vo = new ResumeAnalysisVO();
             vo.setAnalysisId(existing.getId());
@@ -63,8 +60,8 @@ public class ResumeAnalysisServiceImpl implements ResumeAnalysisService {
         ResumeAnalysis analysis = new ResumeAnalysis();
         analysis.setUserId(userId);
         analysis.setResumeId(resumeId);
-        analysis.setTargetRole(StringUtils.defaultString(targetRole));
-        analysis.setTargetLevel(StringUtils.defaultString(targetLevel));
+        analysis.setTargetRole(normalizedTargetRole);
+        analysis.setTargetLevel(normalizedTargetLevel);
         analysis.setAnalysisJson(analysisJson);
         analysis.setCreateTime(new Date());
         analysis.setUpdateTime(new Date());
