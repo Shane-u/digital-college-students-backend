@@ -4,9 +4,8 @@ import cn.hutool.core.io.FileUtil;
 import com.digital.common.BaseResponse;
 import com.digital.common.ErrorCode;
 import com.digital.common.ResultUtils;
-import com.digital.constant.FileConstant;
 import com.digital.exception.BusinessException;
-import com.digital.manager.CosManager;
+import com.digital.manager.MinioManager;
 import com.digital.model.dto.file.UploadFileRequest;
 import com.digital.model.entity.User;
 import com.digital.model.enums.FileUploadBizEnum;
@@ -37,7 +36,7 @@ public class  FileController {
     private UserService userService;
 
     @Resource
-    private CosManager cosManager;
+    private MinioManager minioManager;
 
     /**
      * 文件上传
@@ -60,26 +59,19 @@ public class  FileController {
         // 文件目录：根据业务、用户来划分
         String uuid = RandomStringUtils.randomAlphanumeric(8);
         String filename = uuid + "-" + multipartFile.getOriginalFilename();
-        String filepath = String.format("/%s/%s/%s", fileUploadBizEnum.getValue(), loginUser.getId(), filename);
-        File file = null;
+        String objectName = String.format("%s/%s/%s", fileUploadBizEnum.getValue(), loginUser.getId(), filename);
         try {
-            // 上传文件
-            file = File.createTempFile(filepath, null);
-            multipartFile.transferTo(file);
-            cosManager.putObject(filepath, file);
-            // 返回可访问地址
-            return ResultUtils.success(FileConstant.COS_HOST + filepath);
+            String url = minioManager.putObject(
+                    objectName,
+                    multipartFile.getInputStream(),
+                    multipartFile.getContentType(),
+                    multipartFile.getSize()
+            );
+            // 返回可访问地址（MinIO）
+            return ResultUtils.success(url);
         } catch (Exception e) {
-            log.error("file upload error, filepath = " + filepath, e);
+            log.error("file upload error, objectName = " + objectName, e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "上传失败");
-        } finally {
-            if (file != null) {
-                // 删除临时文件
-                boolean delete = file.delete();
-                if (!delete) {
-                    log.error("file delete error, filepath = {}", filepath);
-                }
-            }
         }
     }
 
@@ -95,12 +87,27 @@ public class  FileController {
         // 文件后缀
         String fileSuffix = FileUtil.getSuffix(multipartFile.getOriginalFilename());
         final long ONE_M = 1024 * 1024L;
+        final long ONE_HUNDRED_M = 100 * ONE_M;
         if (FileUploadBizEnum.USER_AVATAR.equals(fileUploadBizEnum)) {
             if (fileSize > ONE_M) {
                 throw new BusinessException(ErrorCode.PARAMS_ERROR, "文件大小不能超过 1M");
             }
             if (!Arrays.asList("jpeg", "jpg", "svg", "png", "webp").contains(fileSuffix)) {
                 throw new BusinessException(ErrorCode.PARAMS_ERROR, "文件类型错误");
+            }
+        } else if (FileUploadBizEnum.AI_INTERVIEW_RESUME.equals(fileUploadBizEnum)) {
+            if (fileSize > ONE_HUNDRED_M) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "简历文件大小不能超过 100M");
+            }
+            if (!Arrays.asList("pdf", "doc", "docx", "txt").contains(fileSuffix)) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "简历文件类型仅支持 pdf/doc/docx/txt");
+            }
+        } else if (FileUploadBizEnum.AI_INTERVIEW_AUDIO.equals(fileUploadBizEnum)) {
+            if (fileSize > ONE_HUNDRED_M) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "音频文件大小不能超过 100M");
+            }
+            if (!Arrays.asList("webm", "wav", "mp3", "m4a", "aac", "flac", "ogg").contains(fileSuffix)) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "音频文件类型不支持");
             }
         }
     }

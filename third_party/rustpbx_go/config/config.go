@@ -8,6 +8,7 @@ import (
 type Config struct {
 	Server   ServerConfig
 	Backend  BackendConfig
+	Java     JavaConfig
 	Audio    AudioConfig
 	ASR      ASRConfig
 	TTS      TTSConfig
@@ -30,6 +31,14 @@ type ServerConfig struct {
 type BackendConfig struct {
 	URL      string `yaml:"url"`
 	CallType string `yaml:"call_type"`
+}
+
+// JavaConfig is used for calling Java backend internal endpoints.
+type JavaConfig struct {
+	// BaseURL example: http://localhost:8121/api
+	BaseURL string `yaml:"base_url"`
+	// InternalToken header value for X-Internal-Token
+	InternalToken string `yaml:"internal_token"`
 }
 type AudioConfig struct {
 	Codec string `yaml:"codec"`
@@ -63,10 +72,11 @@ type LLMConfig struct {
 	URL          string
 	SystemPrompt string
 	SiliconFlow  struct {
-		APIKey       string
-		URL          string
-		Model        string
-		SystemPrompt string
+		APIKey          string
+		URL             string
+		Model           string
+		SystemPrompt    string
+		InterviewPrompt string
 	}
 }
 
@@ -154,6 +164,10 @@ func LoadConfig() (*Config, error) {
 			URL:      getEnv("BACKEND_URL", "ws://localhost:8080"),
 			CallType: getEnv("BACKEND_CALL_TYPE", "webrtc"),
 		},
+		Java: JavaConfig{
+			BaseURL:       getEnv("JAVA_BASE_URL", "http://localhost:8121/api"),
+			InternalToken: getEnv("JAVA_INTERNAL_TOKEN", ""),
+		},
 		Audio: AudioConfig{
 			Codec: getEnv("AUDIO_CODEC", "g722"),
 		},
@@ -221,6 +235,7 @@ func LoadConfig() (*Config, error) {
 	config.LLM.SiliconFlow.URL = getEnv("LLM_SILICONFLOW_URL", "https://api.siliconflow.cn/v1/chat/completions")
 	config.LLM.SiliconFlow.Model = getEnv("LLM_SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 	config.LLM.SiliconFlow.SystemPrompt = getEnv("LLM_SILICONFLOW_SYSTEM_PROMPT", "You are a helpful assistant. Provide concise responses. Use 'hangup' tool when the conversation is complete. 如果我说使用联网搜索那你就使用这个search online这个工具，如果我说生成图片那你就使用generate image这个工具.please use Chinese to replay!! 铭记使用中文回答！！")
+	config.LLM.SiliconFlow.InterviewPrompt = getEnv("LLM_SILICONFLOW_INTERVIEW_PROMPT", "")
 
 	return config, nil
 }

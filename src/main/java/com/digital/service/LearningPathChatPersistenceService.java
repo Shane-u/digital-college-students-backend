@@ -4,7 +4,6 @@ import com.digital.model.entity.ChatMessage;
 import com.digital.model.entity.ChatSession;
 import com.digital.repository.ChatMessageRepository;
 import com.digital.repository.ChatSessionRepository;
-import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -18,8 +17,9 @@ import java.util.UUID;
  * 复用 chat_sessions / chat_messages 两个集合
  */
 @Service
-@Slf4j
 public class LearningPathChatPersistenceService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LearningPathChatPersistenceService.class);
 
     @Resource
     private ChatSessionRepository chatSessionRepository;

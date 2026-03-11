@@ -38,6 +38,7 @@ type SiliconFlowHandler struct {
 	logger          *logrus.Logger
 	history         []SFMessage
 	frontendSender  tools.FrontendSender
+	interviewPrompt string
 }
 
 // SiliconFlowRJson shane: Response JSON structure for SiliconFlow
@@ -120,6 +121,15 @@ func NewSiliconFlowHandler(ctx context.Context, apiKey, endpoint, model string, 
 		searchApiKey:   searchApiKey,
 		searchApiModel: searchApiModel,
 	}
+}
+
+// SetInterviewPrompt 设置面试官专用提示词（与 tools 通用智能体分离）
+func (h *SiliconFlowHandler) SetInterviewPrompt(p string) {
+	h.interviewPrompt = p
+}
+
+func (h *SiliconFlowHandler) GetInterviewPrompt() string {
+	return h.interviewPrompt
 }
 
 // SetFrontendSender 设置向前端发送指令的抽象（可选）。设置后，nav 等工具会通过其发指令并收前端反馈，用于 TTS。

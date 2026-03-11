@@ -12,7 +12,11 @@ import org.apache.commons.lang3.ObjectUtils;
  */
 public enum FileUploadBizEnum {
 
-    USER_AVATAR("用户头像", "user_avatar");
+    USER_AVATAR("用户头像", "user_avatar"),
+
+    AI_INTERVIEW_RESUME("AI面试-简历", "ai_interview_resume"),
+
+    AI_INTERVIEW_AUDIO("AI面试-音频", "ai_interview_audio");
 
     private final String text;
 
