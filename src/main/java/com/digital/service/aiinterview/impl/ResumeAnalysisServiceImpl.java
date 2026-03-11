@@ -32,13 +32,9 @@ public class ResumeAnalysisServiceImpl implements ResumeAnalysisService {
         qw.eq("userId", userId).eq("resumeId", resumeId).eq("isDelete", 0);
         if (StringUtils.isNotBlank(targetRole)) {
             qw.eq("targetRole", targetRole);
-        } else {
-            qw.isNull("targetRole").or().eq("targetRole", "");
         }
         if (StringUtils.isNotBlank(targetLevel)) {
             qw.eq("targetLevel", targetLevel);
-        } else {
-            qw.isNull("targetLevel").or().eq("targetLevel", "");
         }
         ResumeAnalysis existing = analysisMapper.selectOne(qw);
         if (existing != null && StringUtils.isNotBlank(existing.getAnalysisJson())) {

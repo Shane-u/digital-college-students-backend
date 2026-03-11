@@ -22,24 +22,24 @@ import (
 
 // FrontendServer 管理前端WebSocket连接
 type FrontendServer struct {
-	upgrader       websocket.Upgrader
-	clients        map[*websocket.Conn]bool
-	conn           *websocket.Conn
-	RealTimeConn   *websocket.Conn
-	llm            *handler.LLMHandler
-	siliconFlowLLM *handler.SiliconFlowHandler // shane: siliconflow LLM handler
-	backendConn    *websocket.Conn             // shane: 与后端的连接
-	backendServer  *BackendServer              // shane: 后端服务实例
-	codec          string                      // shane: codec for audio stream
-	asrOption      *pbx_back_end.ASROption
-	ttsOption      *pbx_back_end.TTSOption
-	javaBaseURL    string
-	javaToken      string
-	currentSessionId string
-	currentUserId    int64
+	upgrader          websocket.Upgrader
+	clients           map[*websocket.Conn]bool
+	conn              *websocket.Conn
+	RealTimeConn      *websocket.Conn
+	llm               *handler.LLMHandler
+	siliconFlowLLM    *handler.SiliconFlowHandler // shane: siliconflow LLM handler
+	backendConn       *websocket.Conn             // shane: 与后端的连接
+	backendServer     *BackendServer              // shane: 后端服务实例
+	codec             string                      // shane: codec for audio stream
+	asrOption         *pbx_back_end.ASROption
+	ttsOption         *pbx_back_end.TTSOption
+	javaBaseURL       string
+	javaToken         string
+	currentSessionId  string
+	currentUserId     int64
 	currentQuestionId string
-	mu             sync.Mutex // shane: solve the concurrent write problem
-	writeMu        sync.Mutex // shane: 专门用于保护 WebSocket 写入操作的锁
+	mu                sync.Mutex // shane: solve the concurrent write problem
+	writeMu           sync.Mutex // shane: 专门用于保护 WebSocket 写入操作的锁
 }
 
 func NewFrontendServer(llm *handler.LLMHandler, siliconFlowLLM *handler.SiliconFlowHandler, backendConn *websocket.Conn, backendServer *BackendServer, codec string, asrOption *pbx_back_end.ASROption, ttsOption *pbx_back_end.TTSOption, javaBaseURL string, javaToken string) *FrontendServer {
@@ -250,9 +250,9 @@ func (s *FrontendServer) safeWriteToRealTimeConn(messageType int, data []byte) e
 	if conn.RemoteAddr() != nil {
 		remoteAddrStr = conn.RemoteAddr().String()
 	}
-	logrus.Infof("safeWriteToRealTimeConn: Writing message to RealTimeConn (remote: %s), size: %d bytes, content: %s", 
+	logrus.Infof("safeWriteToRealTimeConn: Writing message to RealTimeConn (remote: %s), size: %d bytes, content: %s",
 		remoteAddrStr, len(data), string(data))
-	
+
 	// 检查连接状态
 	connState := "unknown"
 	if conn.RemoteAddr() != nil {
@@ -261,7 +261,7 @@ func (s *FrontendServer) safeWriteToRealTimeConn(messageType int, data []byte) e
 		connState = "disconnected"
 	}
 	logrus.Infof("safeWriteToRealTimeConn: Connection state: %s", connState)
-	
+
 	if err := conn.WriteMessage(messageType, data); err != nil {
 		if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 			// 连接已关闭，清理连接
@@ -465,7 +465,7 @@ func (s *FrontendServer) handleWebSocket2(w gin.ResponseWriter, r *http.Request)
 	s.RealTimeConn = conn  // shane: 一定要记住保存连接，后面需要用到
 	remoteAddr := conn.RemoteAddr().String()
 	s.mu.Unlock()
-	
+
 	logrus.Infof("handleWebSocket2: RealTimeConn established, remote: %s", remoteAddr)
 
 	defer func() {

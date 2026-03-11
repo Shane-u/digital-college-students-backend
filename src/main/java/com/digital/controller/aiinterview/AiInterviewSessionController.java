@@ -3,6 +3,7 @@ package com.digital.controller.aiinterview;
 import com.digital.common.BaseResponse;
 import com.digital.common.ErrorCode;
 import com.digital.common.ResultUtils;
+import com.digital.exception.BusinessException;
 import com.digital.exception.ThrowUtils;
 import com.digital.model.dto.aiinterview.AudioAnswerUploadRequest;
 import com.digital.model.dto.aiinterview.TextAnswerUploadRequest;
@@ -11,12 +12,14 @@ import com.digital.model.dto.aiinterview.NextQuestionRequest;
 import com.digital.model.entity.User;
 import com.digital.model.vo.aiinterview.AnswerVO;
 import com.digital.model.vo.aiinterview.InterviewReportVO;
+import com.digital.model.vo.aiinterview.InterviewReportSummaryVO;
 import com.digital.model.vo.aiinterview.InterviewSessionVO;
 import com.digital.model.vo.aiinterview.QuestionVO;
 import com.digital.service.UserService;
 import com.digital.service.aiinterview.InterviewSessionService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -87,8 +90,12 @@ public class AiInterviewSessionController {
                                              @RequestParam(value = "userId", required = false) Long userId,
                                              HttpServletRequest request) {
         Long resolvedUserId = resolveUserId(request, userId);
-        ThrowUtils.throwIf(body == null || body.getQuestionId() == null,
-                ErrorCode.PARAMS_ERROR, "questionId 不能为空");
+        if (body == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "body 不能为空");
+        }
+        if (body.getQuestionId() == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "questionId 不能为空");
+        }
         return ResultUtils.success(sessionService.uploadTextAnswer(
                 resolvedUserId,
                 sessionId,
@@ -113,6 +120,20 @@ public class AiInterviewSessionController {
                                                  HttpServletRequest request) {
         Long resolvedUserId = resolveUserId(request, userId);
         return ResultUtils.success(sessionService.getReport(resolvedUserId, sessionId));
+    }
+
+    /**
+     * 历史报告列表（用于前端列表页）
+     */
+    @GetMapping("/reports")
+    public BaseResponse<List<InterviewReportSummaryVO>> listReports(
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "beforeId", required = false) Long beforeId,
+            @RequestParam(value = "userId", required = false) Long userId,
+            HttpServletRequest request
+    ) {
+        Long resolvedUserId = resolveUserId(request, userId);
+        return ResultUtils.success(sessionService.listReports(resolvedUserId, limit, beforeId));
     }
 
     private Long resolveUserId(HttpServletRequest request, Long userId) {

@@ -2,6 +2,7 @@ package com.digital.service.aiinterview.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.digital.common.ErrorCode;
+import com.digital.exception.BusinessException;
 import com.digital.exception.ThrowUtils;
 import com.digital.mapper.AiInterviewSessionMapper;
 import com.digital.mapper.InterviewAnswerMapper;
@@ -15,6 +16,7 @@ import com.digital.model.entity.InterviewChatMessage;
 import com.digital.model.entity.InterviewReport;
 import com.digital.model.vo.aiinterview.AnswerVO;
 import com.digital.model.vo.aiinterview.InterviewReportVO;
+import com.digital.model.vo.aiinterview.InterviewReportSummaryVO;
 import com.digital.model.vo.aiinterview.InterviewSessionVO;
 import com.digital.model.vo.aiinterview.QuestionVO;
 import com.digital.service.aiinterview.AsrClient;
@@ -26,6 +28,7 @@ import com.digital.service.aiinterview.ResumeService;
 import com.digital.service.aiinterview.TtsClient;
 import java.util.Date;
 import java.util.List;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -126,7 +129,9 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         AiInterviewSession session = getSession(userId, sessionId);
         InterviewQuestion question = getQuestion(sessionId, questionId);
 
-        ThrowUtils.throwIf(audioFile == null || audioFile.isEmpty(), ErrorCode.PARAMS_ERROR, "音频为空");
+        if (audioFile == null || audioFile.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "音频为空");
+        }
         String audioUrl = fileStorageService.uploadAudioFile(userId, audioFile);
 
         AsrClient.AsrResult asr = asrClient.transcribe(toBytes(audioFile), audioFile.getContentType());
@@ -213,6 +218,32 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     public InterviewReportVO getReport(Long userId, Long sessionId) {
         getSession(userId, sessionId);
         return generateOrGetReport(userId, sessionId, false);
+    }
+
+    @Override
+    public List<InterviewReportSummaryVO> listReports(Long userId, Integer limit, Long beforeId) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户 ID 不能为空");
+        int lim = limit == null ? 20 : Math.max(1, Math.min(100, limit));
+
+        QueryWrapper<InterviewReport> qw = new QueryWrapper<>();
+        qw.eq("userId", userId).eq("isDelete", 0);
+        if (beforeId != null) {
+            qw.lt("id", beforeId);
+        }
+        qw.orderByDesc("id").last("limit " + lim);
+        List<InterviewReport> list = reportMapper.selectList(qw);
+        if (list == null || list.isEmpty()) {
+            return List.of();
+        }
+        return list.stream().map(r -> {
+            InterviewReportSummaryVO vo = new InterviewReportSummaryVO();
+            vo.setReportId(r.getId());
+            vo.setSessionId(r.getSessionId());
+            vo.setResumeId(r.getResumeId());
+            vo.setCreateTime(r.getCreateTime());
+            vo.setUpdateTime(r.getUpdateTime());
+            return vo;
+        }).collect(Collectors.toList());
     }
 
     private InterviewReportVO generateOrGetReport(Long userId, Long sessionId, boolean generateIfMissing) {

@@ -2,8 +2,10 @@ package com.digital.service.aiinterview;
 
 import com.digital.model.vo.aiinterview.AnswerVO;
 import com.digital.model.vo.aiinterview.InterviewReportVO;
+import com.digital.model.vo.aiinterview.InterviewReportSummaryVO;
 import com.digital.model.vo.aiinterview.InterviewSessionVO;
 import com.digital.model.vo.aiinterview.QuestionVO;
+import java.util.List;
 import org.springframework.web.multipart.MultipartFile;
 
 public interface InterviewSessionService {
@@ -39,5 +41,14 @@ public interface InterviewSessionService {
     InterviewReportVO finish(Long userId, Long sessionId);
 
     InterviewReportVO getReport(Long userId, Long sessionId);
+
+    /**
+     * 查询当前用户的历史面试报告列表（按 reportId 倒序，支持游标分页）
+     *
+     * @param userId 用户ID
+     * @param limit 返回条数（建议 1-100）
+     * @param beforeId 游标：返回 reportId < beforeId 的数据（可选）
+     */
+    List<InterviewReportSummaryVO> listReports(Long userId, Integer limit, Long beforeId);
 }
 
