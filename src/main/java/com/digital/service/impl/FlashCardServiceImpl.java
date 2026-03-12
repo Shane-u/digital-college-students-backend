@@ -805,6 +805,12 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
         BeanUtils.copyProperties(flashCard, flashCardVO);
         // 实体中使用 repetition 字段，VO 中是 reviewCount，这里手动映射，避免为 null
         flashCardVO.setReviewCount(flashCard.getRepetition());
+        // 层级路径直接透传，方便前端/图谱定位
+        flashCardVO.setHierarchyPath(flashCard.getHierarchyPath());
+        // 亮度相关字段目前由测试结果 / Neo4j 图谱计算，这里保持为空或默认值，前端可选择性使用
+        flashCardVO.setLitStatus(null);
+        flashCardVO.setLitScore(null);
+        flashCardVO.setLitProgress(null);
         return flashCardVO;
     }
 

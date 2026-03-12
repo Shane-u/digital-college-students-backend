@@ -66,6 +66,31 @@ public class GrowthRecord implements Serializable {
     @TableLogic
     private Integer isDelete;
 
+    /**
+     * 关联的闪卡测试 ID（可选）
+     */
+    private Long testId;
+
+    /**
+     * 关联的学习节点 ID（如闪卡 ID）
+     */
+    private String nodeId;
+
+    /**
+     * 本次测试得分（可选）
+     */
+    private Integer score;
+
+    /**
+     * 点亮状态（0-未点亮，1-已点亮）
+     */
+    private Integer litStatus;
+
+    /**
+     * 点亮进度（预留，0-100）
+     */
+    private Integer litProgress;
+
     @TableField(exist = false)
     private static final long serialVersionUID = 1L;
 }

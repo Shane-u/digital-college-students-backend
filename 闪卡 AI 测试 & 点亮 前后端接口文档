@@ -1,0 +1,148 @@
+总体流程
+用户登录 → 拿到会话（Cookie / Token）
+选择某个闪卡节点 → 调用「AI 出题接口」生成试卷
+在前端完成作答 → 调用「AI 批改接口」提交答案
+批改接口内部完成：计分 → 点亮叶子闪卡 → 更新父节点进度 → 写成长轨迹
+前端刷新学习路径图谱 / 闪卡列表 → 根据亮度字段渲染 UI
+
+1. 登录接口（前置）
+URL：POST /api/user/login
+Body（JSON）：
+{
+  "userAccount": "xxx",
+  "userPassword": "xxx"
+}
+前端要做的事：
+成功后保存 Cookie（浏览器自动）或 Token（如果有）；
+后续所有接口都在登录态下调用。
+
+2. AI 出题接口（生成测试）
+URL：POST /api/flash-card/test/generate
+Body（JSON）：
+{
+  "nodeId": "闪卡ID",      // 必填，与 Neo4j / flash_card.id 对应
+  "pathId": 1,            // 可选，学习路径ID
+  "difficulty": "easy"    // easy / medium / hard
+}
+响应 data 结构（关键字段）：
+{
+  "testId": "2031011317811822594",
+  "nodeId": "2018574102145982466",
+  "difficulty": "easy",
+  "questions": [
+    {
+      "id": "2031011317912485890",
+      "questionType": "choice",       // choice / blank / code
+      "content": "题干",
+      "options": ["A", "B", "C", "D"],// 仅 choice 有
+      "difficulty": "easy",
+      "score": 3                      // choice=3, blank=5, code=10
+    }
+  ]
+}
+前端要做的事：
+保存 testId 和每题的 id/questionType/content/options/score；
+用这些数据渲染测试页面（单选、填空、代码输入等）。
+
+3. AI 批改接口（提交作答 + 点亮）
+URL：POST /api/flash-card/test/submit
+Body（JSON）：
+{
+  "testId": "2031011317811822594",
+  "answers": [
+    {
+      "questionId": "2031011317912485890",
+      "questionType": "choice",
+      "userAnswer": "A"
+    },
+    {
+      "questionId": "2031011318885564417",
+      "questionType": "blank",
+      "userAnswer": "VS Code 和 Vue Devtools"
+    },
+    {
+      "questionId": "2031011319409852417",
+      "questionType": "code",
+      "userAnswer": "用户输入的代码",
+      "userUploadUrl": null          // 如有拍照URL可传这里
+    }
+  ]
+}
+响应 data 结构：
+{
+  "testId": "2031011317811822594",
+  "totalScore": 86,       // 0–100，按 3/5/10 分规则求和
+  "pass": true,           // >=60 为 true
+  "aiAdvice": "学习建议文本",
+  "litStatus": 1,         // 本闪卡是否点亮：1=点亮，0=未点亮
+  "litProgress": 86       // 本闪卡亮度(0–100)，=本次得分
+}
+后端在这个接口内部已经做的事：
+
+批改所有题目（选择/填空直接比对，代码题用豆包评分）；
+更新 flashcard_test.score / litProgress / aiAdvice；
+更新 Neo4j 叶子闪卡节点：
+litStatus / litScore / litDifficulty / litProgress / testUpdateTime
+自底向上更新所有父节点（Root、Level1/2/3）：
+litProgress = 子树下已点亮闪卡数 / 闪卡总数 * 100
+litStatus = litProgress >= 80
+写入 growth_record 一条成长记录快照。
+前端要做的事：
+
+在当前测试结果页面展示：分数、通过状态、AI 学习建议；
+可根据 litStatus/litProgress 立即更新当前闪卡卡片 UI（本地状态）。
+
+4. 学习路径图谱接口（刷新整棵树的亮度）
+URL：GET /api/flash-card/neo4j/graph-by-updated?range=ALL
+响应 data 结构（简化）：
+{
+  "nodes": [
+    {
+      "elementId": "xxx",
+      "labels": ["User_1_Root"],
+      "name": "根",
+      "userId": 1,
+      "litStatus": false,
+      "litProgress": 60
+    },
+    {
+      "elementId": "yyy",
+      "labels": ["User_1_FlashCard"],
+      "id": "2018574102145982466",
+      "title": "Vue 学习路径",
+      "hierarchyPath": "根/课程/前端/Vue.js",
+      "litStatus": true,
+      "litScore": 86,
+      "litProgress": 86,
+      "testUpdateTime": 1710000000000
+    }
+  ],
+  "relationships": [
+    {
+      "elementId": "rel1",
+      "type": "LINK_TO",
+      "startNodeElementId": "rootEl",
+      "endNodeElementId": "level1El"
+    }
+  ]
+}
+前端要做的事：
+根据 labels 区分 Root / Level / FlashCard；
+用 relationships 画出树（或力导图、层级图）；
+渲染亮度：
+叶子闪卡：litStatus 控制是否点亮，litProgress 控制发光/进度条；
+父节点：litProgress = 模块完成度（0–100），litStatus = 模块是否整体点亮。
+5. 闪卡列表 / 详情接口（可选）
+列表：GET /api/flash-card/list → FlashCardVO[]（含 hierarchyPath + 预留的 litStatus/litProgress 字段）
+详情：GET /api/flash-card/get?id=xxx（如有）
+前端可以在列表/详情页：
+
+用 hierarchyPath 展示面包屑（根/课程/前端/Vue.js）；
+如果需要最新亮度，可以结合图谱接口返回的同一 id 的 litStatus/litProgress 做合并展示。
+前端整体操作顺序建议
+
+登录（一次）
+进入学习路径页：调用 graph-by-updated 渲染整棵树和亮度
+点击某闪卡 → 调 generate → 弹出答题页
+提交答题 → 调 submit → 显示分数+建议
+返回路径页 → 重新调 graph-by-updated，看到叶子与父节点的最新亮度变化
