@@ -11,7 +11,9 @@ import com.digital.model.dto.learningpath.LearningPathPlanRequest;
 import com.digital.model.dto.learningpath.LearningPathSaveRequest;
 import com.digital.model.entity.LearningPath;
 import com.digital.model.vo.LearningPathGraphVO;
+import com.digital.model.vo.LearningPathFlashcardMatchVO;
 import com.digital.mapper.LearningPathMapper;
+import com.digital.mapper.LearningPathFlashcardMatchMapper;
 import com.digital.service.LearningPathNeo4jService;
 import com.digital.service.LearningPathService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,7 +25,9 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.Resource;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
@@ -82,22 +86,90 @@ public class LearningPathServiceImpl implements LearningPathService {
     @Resource
     private LearningPathNeo4jService learningPathNeo4jService;
 
+    @Resource
+    private LearningPathFlashcardMatchMapper learningPathFlashcardMatchMapper;
+
     @Value("${silicon-flow.learning-path-model:Qwen/Qwen3-30B-A3B-Instruct-2507}")
     private String learningPathModel;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * 兼容流式规划输出：前端可能会把 meta 的 {"sessionId": "..."} 与真正的 {"nodes":[...]} 拼在一起。
+     * 这里从原始字符串中提取包含 "nodes" 的那段 JSON 对象。
+     */
+    private String extractNodesJson(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String s = raw.trim();
+        if (s.isEmpty()) {
+            return s;
+        }
+        // 如果本身就是合法 JSON 且包含 nodes，直接返回
+        try {
+            var tree = objectMapper.readTree(s);
+            if (tree != null && tree.has("nodes")) {
+                return s;
+            }
+        } catch (Exception ignored) {
+        }
+
+        int nodesIdx = s.indexOf("\"nodes\"");
+        if (nodesIdx < 0) {
+            return s;
+        }
+        int start = s.lastIndexOf('{', nodesIdx);
+        if (start < 0) {
+            start = 0;
+        }
+
+        // 通过括号计数找到对应的 JSON 结束位置
+        int depth = 0;
+        boolean inString = false;
+        boolean escape = false;
+        for (int i = start; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (inString) {
+                if (escape) {
+                    escape = false;
+                } else if (c == '\\') {
+                    escape = true;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+                continue;
+            }
+            if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    return s.substring(start, i + 1).trim();
+                }
+            }
+        }
+        return s.substring(start).trim();
+    }
+
     @Override
     public void planLearningPathStream(LearningPathPlanRequest request,
                                        BooleanSupplier shouldStop,
                                        BiConsumer<String, Boolean> onChunk) {
-        ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR, "请求参数不能为空");
-        ThrowUtils.throwIf(StringUtils.isBlank(request.getUserPrompt()), ErrorCode.PARAMS_ERROR, "用户提示词不能为空");
+        if (request == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "请求参数不能为空");
+        }
+        String userPrompt = request.getUserPrompt();
+        ThrowUtils.throwIf(StringUtils.isBlank(userPrompt), ErrorCode.PARAMS_ERROR, "用户提示词不能为空");
 
         List<Message> messages = new ArrayList<>();
         messages.add(Message.system(SYSTEM_PROMPT));
 
-        String userContent = request.getUserPrompt();
+        String userContent = userPrompt;
         if (StringUtils.isNotBlank(request.getCurrentPathJson())) {
             userContent += "\n\n当前学习路径（请在此基础上修改）：\n" + request.getCurrentPathJson();
         }
@@ -122,14 +194,19 @@ public class LearningPathServiceImpl implements LearningPathService {
 
     @Override
     public LearningPath saveLearningPath(LearningPathSaveRequest request) {
-        ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR, "请求参数不能为空");
-        ThrowUtils.throwIf(StringUtils.isBlank(request.getPathJson()), ErrorCode.PARAMS_ERROR, "学习路径 JSON 不能为空");
-        ThrowUtils.throwIf(StringUtils.isBlank(request.getTopic()), ErrorCode.PARAMS_ERROR, "路径主题不能为空");
-        ThrowUtils.throwIf(request.getUserId() == null, ErrorCode.PARAMS_ERROR, "用户 ID 不能为空");
+        if (request == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "请求参数不能为空");
+        }
+        String pathJsonStr = extractNodesJson(request.getPathJson());
+        String topic = request.getTopic();
+        Long uid = request.getUserId();
+        ThrowUtils.throwIf(StringUtils.isBlank(pathJsonStr), ErrorCode.PARAMS_ERROR, "学习路径 JSON 不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(topic), ErrorCode.PARAMS_ERROR, "路径主题不能为空");
+        ThrowUtils.throwIf(uid == null, ErrorCode.PARAMS_ERROR, "用户 ID 不能为空");
 
         LearningPathJson pathJson;
         try {
-            pathJson = objectMapper.readValue(request.getPathJson(), LearningPathJson.class);
+            pathJson = objectMapper.readValue(pathJsonStr, LearningPathJson.class);
         } catch (Exception e) {
             log.error("解析学习路径 JSON 失败：{}", e.getMessage());
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "学习路径 JSON 格式无效");
@@ -141,17 +218,16 @@ public class LearningPathServiceImpl implements LearningPathService {
         String pathId = UUID.randomUUID().toString();
         LearningPath entity = new LearningPath();
         entity.setId(pathId);
-        entity.setUserId(request.getUserId());
-        entity.setTopic(request.getTopic());
+        entity.setUserId(uid);
+        entity.setTopic(topic);
         entity.setDescription(request.getDescription());
-        entity.setPathJson(request.getPathJson());
+        entity.setPathJson(pathJsonStr);
         entity.setCreateTime(new Date());
         entity.setUpdateTime(new Date());
 
         // Saga：先写 Neo4j，再写 MySQL
         try {
-            learningPathNeo4jService.saveLearningPath(
-                    entity.getUserId(), pathId, entity.getTopic(), pathJson);
+            learningPathNeo4jService.saveLearningPath(uid, pathId, topic, pathJson);
         } catch (Exception e) {
             log.error("保存学习路径到 Neo4j 失败：pathId={}, error={}", pathId, e.getMessage());
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "保存学习路径失败：" + e.getMessage());
@@ -211,7 +287,10 @@ public class LearningPathServiceImpl implements LearningPathService {
         ThrowUtils.throwIf(pathJson == null || pathJson.getNodes() == null, ErrorCode.PARAMS_ERROR, "学习路径 JSON 不能为空");
 
         LearningPath path = getById(userId, pathId);
-        ThrowUtils.throwIf(path == null, ErrorCode.NOT_FOUND_ERROR, "学习路径不存在");
+        if (path == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "学习路径不存在");
+        }
+        String topic = path.getTopic();
 
         LearningPathJson oldPathJson = null;
         try {
@@ -230,7 +309,7 @@ public class LearningPathServiceImpl implements LearningPathService {
 
         // Saga：先更新 Neo4j，再更新 MySQL
         try {
-            learningPathNeo4jService.updateLearningPath(userId, pathId, path.getTopic(), pathJson);
+            learningPathNeo4jService.updateLearningPath(userId, pathId, topic, pathJson);
         } catch (Exception e) {
             log.error("更新 Neo4j 学习路径失败：{}", e.getMessage());
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "更新学习路径失败");
@@ -247,7 +326,7 @@ public class LearningPathServiceImpl implements LearningPathService {
         } catch (Exception e) {
             log.error("更新 MySQL 学习路径失败，执行 Neo4j 补偿回滚：pathId={}, error={}", pathId, e.getMessage());
             if (oldPathJson != null) {
-                learningPathNeo4jService.updateLearningPath(userId, pathId, path.getTopic(), oldPathJson);
+                learningPathNeo4jService.updateLearningPath(userId, pathId, topic, oldPathJson);
             } else {
                 learningPathNeo4jService.deleteLearningPath(userId, pathId);
             }
@@ -293,6 +372,62 @@ public class LearningPathServiceImpl implements LearningPathService {
                 learningPathNeo4jService.saveLearningPath(userId, pathId, path.getTopic(), pathJsonForRollback);
             }
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "删除学习路径失败：" + e.getMessage());
+        }
+    }
+
+    @Override
+    public void persistFlashcardMatches(Long userId, String pathId, LearningPathFlashcardMatchVO vo) {
+        if (userId == null || StringUtils.isBlank(pathId) || vo == null || StringUtils.isBlank(vo.getClickedNodeId())) {
+            return;
+        }
+        String nodeId = vo.getClickedNodeId();
+        // 幂等：先把该 node 旧关联软删除，再插入新关联
+        try {
+            var oldList = learningPathFlashcardMatchMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.digital.model.entity.LearningPathFlashcardMatch>()
+                            .eq("userId", userId)
+                            .eq("pathId", pathId)
+                            .eq("nodeId", nodeId)
+                            .eq("isDelete", 0)
+            );
+            if (oldList != null) {
+                for (var m : oldList) {
+                    m.setIsDelete(1);
+                    m.setUpdateTime(new Date());
+                    learningPathFlashcardMatchMapper.updateById(m);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("清理旧 match 关联失败: userId={}, pathId={}, nodeId={}, error={}",
+                    userId, pathId, nodeId, e.getMessage());
+        }
+
+        List<String> ids = vo.getMatchedFlashcardIds() == null ? List.of() : vo.getMatchedFlashcardIds();
+        if (ids.isEmpty()) {
+            return;
+        }
+        Set<String> dedup = new HashSet<>(ids);
+        Date now = new Date();
+        for (String fid : dedup) {
+            if (StringUtils.isBlank(fid)) {
+                continue;
+            }
+            try {
+                com.digital.model.entity.LearningPathFlashcardMatch m = new com.digital.model.entity.LearningPathFlashcardMatch();
+                m.setUserId(userId);
+                m.setPathId(pathId);
+                m.setNodeId(nodeId);
+                m.setFlashcardId(fid);
+                Double score = vo.getScoreMap() == null ? null : vo.getScoreMap().get(fid);
+                m.setScore(score);
+                m.setCreateTime(now);
+                m.setUpdateTime(now);
+                m.setIsDelete(0);
+                learningPathFlashcardMatchMapper.insert(m);
+            } catch (Exception e) {
+                log.warn("插入 match 关联失败: userId={}, pathId={}, nodeId={}, flashcardId={}, error={}",
+                        userId, pathId, nodeId, fid, e.getMessage());
+            }
         }
     }
 

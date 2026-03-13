@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>闪卡测试点调试页</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { padding: 20px; }
+    pre { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .question-card { border: 1px solid #e5e6eb; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; }
+    .badge-type { font-size: 12px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h3 class="mb-3">闪卡测试点调试 Demo</h3>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">配置</h5>
+          <div class="mb-2">
+            <label class="form-label">后端 Base URL</label>
+            <input id="baseUrl" class="form-control mono" value="http://localhost:8121/api" />
+          </div>
+          <div class="alert alert-secondary mb-0">
+            说明：支持
+            <code>/flash-card/test/generate</code>（生成试卷）、
+            <code>/flash-card/test/submit</code>（提交批改）、
+            <code>/flash-card/test/papers</code>（历史试卷）、
+            <code>/flash-card/test/{testId}/attempts</code>（提交历史）、
+            <code>/flash-card/test/{testId}/questions/best</code>（每题历史最高分）。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">当前状态</h5>
+          <div class="mb-1"><span class="badge text-bg-info">testId</span> <span id="testId" class="mono"></span></div>
+          <div class="mb-1"><span class="badge text-bg-info">nodeId（闪卡ID）</span> <span id="nodeId" class="mono"></span></div>
+          <div class="mb-1"><span class="badge text-bg-info">difficulty</span> <span id="difficulty" class="mono"></span></div>
+          <div class="mb-1"><span class="badge text-bg-success">totalScore</span> <span id="totalScore" class="mono"></span></div>
+          <div class="mb-1"><span class="badge text-bg-success">pass(>=60)</span> <span id="passFlag" class="mono"></span></div>
+          <div class="mb-1"><span class="badge text-bg-warning">litStatus(闪卡)</span> <span id="litStatus" class="mono"></span></div>
+          <div class="mb-0"><span class="badge text-bg-warning">litProgress(0-100)</span> <span id="litProgress" class="mono"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">1) 生成测试（出卷 = 测试点）</h5>
+          <div class="row g-2 align-items-end">
+            <div class="col-12 col-lg-3">
+              <label class="form-label">闪卡节点 ID（nodeId）</label>
+              <input id="fcNodeId" class="form-control mono" placeholder="例如 2018574102145982466" />
+            </div>
+            <div class="col-12 col-lg-3">
+              <label class="form-label">difficulty</label>
+              <select id="fcDifficulty" class="form-select">
+                <option value="easy">easy</option>
+                <option value="medium" selected>medium</option>
+                <option value="hard">hard</option>
+              </select>
+            </div>
+            <div class="col-12 col-lg-3">
+              <button class="btn btn-primary w-100" onclick="generateTest()">生成测试</button>
+            </div>
+          </div>
+          <div class="mt-3">
+            <pre id="generateOut" class="mono"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">1.1) 历史试卷 / 提交历史 / 每题最高分</h5>
+          <div class="row g-2 align-items-end">
+            <div class="col-12 col-lg-3">
+              <label class="form-label">nodeId（闪卡ID）</label>
+              <input id="historyNodeId" class="form-control mono" placeholder="例如 2018574102145982466" />
+            </div>
+            <div class="col-12 col-lg-3">
+              <label class="form-label">difficulty</label>
+              <select id="historyDifficulty" class="form-select">
+                <option value="">全部</option>
+                <option value="easy">easy</option>
+                <option value="medium" selected>medium</option>
+                <option value="hard">hard</option>
+              </select>
+            </div>
+            <div class="col-12 col-lg-3">
+              <button class="btn btn-outline-primary w-100" onclick="loadPapers()">加载历史试卷</button>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <div class="row g-2">
+              <div class="col-12 col-lg-6">
+                <label class="form-label">历史试卷（选择一套 testId）</label>
+                <select id="paperSelect" class="form-select" onchange="onPaperChanged()"></select>
+              </div>
+              <div class="col-12 col-lg-6">
+                <label class="form-label">提交历史（attempts）</label>
+                <pre id="attemptsOut" class="mono"></pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <label class="form-label">每题历史最高分（questions/best）</label>
+            <pre id="bestQuestionsOut" class="mono"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">2) 回答题目并提交批改</h5>
+          <div id="questionsContainer" class="mt-2"></div>
+          <div class="mt-2">
+            <button class="btn btn-success" onclick="submitAnswers()">提交并批改</button>
+          </div>
+          <div class="mt-3">
+            <pre id="submitOut" class="mono"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function $(id) { return document.getElementById(id); }
+
+  function getBaseUrl() {
+    return ($('baseUrl').value || '').replace(/\/+$/, '');
+  }
+
+  async function apiFetch(path, opts = {}) {
+    const url = getBaseUrl() + path;
+    const res = await fetch(url, opts);
+    const json = await res.json();
+    if (json.code !== 0) {
+      throw new Error(json.message || ('API error code=' + json.code));
+    }
+    return json.data;
+  }
+
+  let currentTest = null; // 保存 generate 返回的结构，方便提交时用
+
+  async function generateTest() {
+    const nodeId = ($('fcNodeId').value || '').trim();
+    const difficulty = $('fcDifficulty').value;
+    if (!nodeId) {
+      alert('请输入闪卡节点 ID（nodeId）');
+      return;
+    }
+    const body = {
+      nodeId: nodeId,
+      pathId: null,
+      difficulty: difficulty
+    };
+    try {
+      const data = await apiFetch('/flash-card/test/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      currentTest = data;
+      $('testId').textContent = data.testId;
+      $('nodeId').textContent = data.nodeId;
+      $('difficulty').textContent = data.difficulty;
+      $('generateOut').textContent = JSON.stringify(data, null, 2);
+      $('submitOut').textContent = '';
+      $('totalScore').textContent = '';
+      $('passFlag').textContent = '';
+      $('litStatus').textContent = '';
+      $('litProgress').textContent = '';
+      renderQuestions(data.questions || []);
+    } catch (e) {
+      alert('生成测试失败: ' + e.message);
+    }
+  }
+
+  function renderQuestions(questions) {
+    const container = $('questionsContainer');
+    container.innerHTML = '';
+    if (!questions.length) {
+      container.innerHTML = '<div class="text-muted">当前测试暂无题目。</div>';
+      return;
+    }
+    questions.forEach((q, idx) => {
+      const card = document.createElement('div');
+      card.className = 'question-card';
+      card.innerHTML = `
+        <div class="d-flex justify-content-between mb-1">
+          <span class="fw-semibold">Q${idx + 1}</span>
+          <span>
+            <span class="badge bg-secondary badge-type">${q.questionType}</span>
+            <span class="badge bg-light text-dark">score=${q.score}</span>
+          </span>
+        </div>
+        <div class="mb-2">${escapeHtml(q.content || '')}</div>
+        <div id="q-input-${q.id}"></div>
+      `;
+      container.appendChild(card);
+      const inputHost = document.getElementById(`q-input-${q.id}`);
+      if (q.questionType === 'choice' && Array.isArray(q.options)) {
+        q.options.forEach((opt, i) => {
+          const optId = `q-${q.id}-opt-${i}`;
+          const div = document.createElement('div');
+          div.className = 'form-check';
+          div.innerHTML = `
+            <input class="form-check-input" type="radio" name="q-${q.id}" id="${optId}" value="${escapeHtmlAttr(opt)}">
+            <label class="form-check-label" for="${optId}">${escapeHtml(opt)}</label>
+          `;
+          inputHost.appendChild(div);
+        });
+      } else if (q.questionType === 'blank') {
+        inputHost.innerHTML = `<input type="text" class="form-control" placeholder="在这里输入你的回答" data-qid="${q.id}" />`;
+      } else if (q.questionType === 'code') {
+        inputHost.innerHTML = `<textarea class="form-control mono" rows="4" placeholder="在这里输入代码答案" data-qid="${q.id}"></textarea>`;
+      } else {
+        inputHost.innerHTML = `<input type="text" class="form-control" placeholder="通用回答" data-qid="${q.id}" />`;
+      }
+    });
+  }
+
+  function collectAnswers() {
+    if (!currentTest) {
+      alert('请先生成测试');
+      return null;
+    }
+    const answers = [];
+    (currentTest.questions || []).forEach(q => {
+      let userAnswer = '';
+      if (q.questionType === 'choice') {
+        const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
+        userAnswer = checked ? checked.value : '';
+      } else {
+        const input = document.querySelector(`[data-qid="${q.id}"]`);
+        userAnswer = input ? input.value : '';
+      }
+      answers.push({
+        questionId: q.id,
+        questionType: q.questionType,
+        userAnswer: userAnswer,
+        userUploadUrl: null,
+      });
+    });
+    return { testId: currentTest.testId, answers };
+  }
+
+  async function submitAnswers() {
+    const payload = collectAnswers();
+    if (!payload) return;
+    try {
+      const data = await apiFetch('/flash-card/test/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+      $('submitOut').textContent = JSON.stringify(data, null, 2);
+      $('totalScore').textContent = String(data.totalScore);
+      $('passFlag').textContent = String(data.pass);
+      $('litStatus').textContent = String(data.litStatus);
+      $('litProgress').textContent = String(data.litProgress);
+      if (data.submitId) {
+        $('submitOut').textContent += `\n\n本次 submitId(attemptId)=${data.submitId}\n回放：GET /flash-card/test/attempts/${data.submitId}`;
+      }
+    } catch (e) {
+      alert('提交批改失败: ' + e.message);
+    }
+  }
+
+  async function loadPapers() {
+    const nodeId = ($('historyNodeId').value || '').trim();
+    const difficulty = $('historyDifficulty').value;
+    if (!nodeId) {
+      alert('请输入 nodeId');
+      return;
+    }
+    try {
+      const qs = new URLSearchParams({ nodeId });
+      if (difficulty) qs.set('difficulty', difficulty);
+      const papers = await apiFetch('/flash-card/test/papers?' + qs.toString(), {
+        method: 'GET',
+        credentials: 'include',
+      });
+      const sel = $('paperSelect');
+      sel.innerHTML = '';
+      (papers || []).forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = String(p.testId);
+        opt.textContent = `testId=${p.testId} | ${p.difficulty} | attempts=${p.attemptCount} | best=${p.bestTotalScore} | last=${p.lastTotalScore}`;
+        sel.appendChild(opt);
+      });
+      if (sel.options.length) {
+        sel.selectedIndex = 0;
+        await onPaperChanged();
+      } else {
+        $('attemptsOut').textContent = '暂无历史试卷';
+        $('bestQuestionsOut').textContent = '';
+      }
+    } catch (e) {
+      alert('加载历史试卷失败: ' + e.message);
+    }
+  }
+
+  async function onPaperChanged() {
+    const testId = $('paperSelect').value;
+    if (!testId) return;
+    // 允许直接加载这套试卷用于重做
+    try {
+      const paper = await apiFetch(`/flash-card/test/papers/${testId}`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+      currentTest = paper;
+      $('testId').textContent = paper.testId;
+      $('nodeId').textContent = paper.nodeId;
+      $('difficulty').textContent = paper.difficulty;
+      $('generateOut').textContent = JSON.stringify(paper, null, 2);
+      $('submitOut').textContent = '';
+      $('totalScore').textContent = '';
+      $('passFlag').textContent = '';
+      $('litStatus').textContent = '';
+      $('litProgress').textContent = '';
+      renderQuestions(paper.questions || []);
+    } catch (e) {
+      // 不阻断 attempts/best 的展示
+    }
+    try {
+      const attempts = await apiFetch(`/flash-card/test/${testId}/attempts`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+      $('attemptsOut').textContent = JSON.stringify(attempts, null, 2);
+
+      // 顺便把最近一次 attemptId 暴露出来，方便点一下回放
+      const latest = (attempts && attempts.length) ? attempts[0] : null;
+      if (latest && latest.attemptId) {
+        $('attemptsOut').textContent += `\n\n最近一次 attemptId=${latest.attemptId}\n可回放：GET /flash-card/test/attempts/${latest.attemptId}`;
+      }
+    } catch (e) {
+      $('attemptsOut').textContent = '加载 attempts 失败: ' + e.message;
+    }
+
+    try {
+      const bestQs = await apiFetch(`/flash-card/test/${testId}/questions/best`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+      $('bestQuestionsOut').textContent = JSON.stringify(bestQs, null, 2);
+    } catch (e) {
+      $('bestQuestionsOut').textContent = '加载 questions/best 失败: ' + e.message;
+    }
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c] || c));
+  }
+
+  function escapeHtmlAttr(str) {
+    return escapeHtml(String(str)).replace(/"/g, '&quot;');
+  }
+</script>
+</body>
+</html>
+

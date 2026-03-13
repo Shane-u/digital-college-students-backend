@@ -182,6 +182,49 @@
             </div>
             <div id="pathList"></div>
         </div>
+
+        <div class="card">
+            <h2>点亮联动测试（match 落库 + 回溯点亮）</h2>
+            <div class="row">
+                <div class="field">
+                    <label>用户 ID（未登录时使用）</label>
+                    <input type="number" id="lightingUserId" value="1986990047206002690">
+                </div>
+                <div class="field">
+                    <label>pathId（默认用“当前选中路径”）</label>
+                    <input type="text" id="lightingPathId" placeholder="留空则用当前选中路径">
+                </div>
+                <button class="secondary" id="btnLoadGraph">加载图谱</button>
+            </div>
+
+            <div class="row" style="margin-top: 10px;">
+                <div class="field">
+                    <label>clickedNodeId</label>
+                    <input type="text" id="clickedNodeId" placeholder="例如 12（学习路径 nodeId）">
+                </div>
+                <div class="field">
+                    <label>ratio（动态阈值，建议 0.60）</label>
+                    <input type="number" id="matchRatio" value="0.60" step="0.05">
+                </div>
+                <div class="field">
+                    <label>topK</label>
+                    <input type="number" id="matchTopK" value="100">
+                </div>
+                <button id="btnDoMatch">执行 match 并回溯</button>
+            </div>
+
+            <div class="status" id="lightingStatus"></div>
+            <div class="row" style="margin-top: 10px;">
+                <div class="field">
+                    <label>match 返回</label>
+                    <div class="output empty" id="matchOut">等待 match...</div>
+                </div>
+                <div class="field">
+                    <label>图谱节点（来自 Neo4j，含 isLit / progress）</label>
+                    <div class="output empty" id="graphOut">等待加载图谱...</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -208,6 +251,18 @@
         const btnUsePolish = document.getElementById('btnUsePolish');
         const btnUpdateWithPolish = document.getElementById('btnUpdateWithPolish');
 
+        // lighting test
+        const lightingUserIdEl = document.getElementById('lightingUserId');
+        const lightingPathIdEl = document.getElementById('lightingPathId');
+        const btnLoadGraph = document.getElementById('btnLoadGraph');
+        const clickedNodeIdEl = document.getElementById('clickedNodeId');
+        const matchRatioEl = document.getElementById('matchRatio');
+        const matchTopKEl = document.getElementById('matchTopK');
+        const btnDoMatch = document.getElementById('btnDoMatch');
+        const lightingStatusEl = document.getElementById('lightingStatus');
+        const matchOutEl = document.getElementById('matchOut');
+        const graphOutEl = document.getElementById('graphOut');
+
         let _selectedPathId = null;
         let _selectedUserId = null;
 
@@ -223,6 +278,10 @@
                 if (idx === 0 || (idx === 1 && line[0] === ' ')) {
                     const data = line.slice(line.indexOf(':') + 1).replace(/^\s+/, '');
                     if (data && data !== '[DONE]') {
+                        // 忽略 meta 事件的 sessionId，避免拼进最终 JSON
+                        if (data.includes('"sessionId"') && !data.includes('"nodes"')) {
+                            continue;
+                        }
                         const decoded = decode(data);
                         fullText += decoded;
                         append(fullText);
@@ -498,6 +557,9 @@
                     _selectedPathId = pathId;
                     _selectedUserId = userId;
                     selectedPathIdEl.textContent = pathId;
+                    // 同步到点亮测试区域
+                    lightingPathIdEl.value = pathId;
+                    lightingUserIdEl.value = String(userId);
                 } else {
                     alert('获取失败');
                 }
@@ -506,8 +568,96 @@
             }
         }
 
+        function setOut(el, obj) {
+            if (!el) return;
+            const txt = (typeof obj === 'string') ? obj : JSON.stringify(obj, null, 2);
+            el.textContent = txt || '';
+            el.classList.toggle('empty', !txt);
+        }
+
+        function resolveLightingUserId() {
+            const uid = parseInt(lightingUserIdEl.value, 10);
+            if (uid) return uid;
+            return _selectedUserId || parseInt(listUserIdEl.value, 10) || null;
+        }
+
+        function resolveLightingPathId() {
+            const pid = (lightingPathIdEl.value || '').trim();
+            if (pid) return pid;
+            return _selectedPathId;
+        }
+
+        async function loadGraph() {
+            const uid = resolveLightingUserId();
+            const pid = resolveLightingPathId();
+            if (!uid || !pid) {
+                alert('请先选择 pathId 或在上方输入 pathId / userId');
+                return;
+            }
+            lightingStatusEl.textContent = '加载图谱中...';
+            lightingStatusEl.className = 'status streaming';
+            try {
+                const res = await fetch(API + '/learning-path/' + pid + '/graph?userId=' + uid);
+                const data = await res.json();
+                if (data.code !== 0) throw new Error(data.message || ('code=' + data.code));
+                const graph = data.data;
+                // 只展示 nodes 段（含 isLit/testPointsProgress/childrenProgress）
+                setOut(graphOutEl, graph);
+                lightingStatusEl.textContent = '图谱已加载';
+                lightingStatusEl.className = 'status done';
+            } catch (e) {
+                lightingStatusEl.textContent = '加载图谱失败：' + e.message;
+                lightingStatusEl.className = 'status err';
+            }
+        }
+
+        async function doMatch() {
+            const uid = resolveLightingUserId();
+            const pid = resolveLightingPathId();
+            const clickedNodeId = (clickedNodeIdEl.value || '').trim();
+            if (!uid || !pid) {
+                alert('请先选择 pathId 或在上方输入 pathId / userId');
+                return;
+            }
+            if (!clickedNodeId) {
+                alert('请输入 clickedNodeId');
+                return;
+            }
+            const ratio = parseFloat(matchRatioEl.value);
+            const topK = parseInt(matchTopKEl.value, 10);
+            const body = {
+                clickedNodeId,
+                ratio: isFinite(ratio) ? ratio : 0.60,
+                topK: isFinite(topK) ? topK : 100,
+                maxDescendants: 200,
+                maxTokens: 40,
+                threshold: 0
+            };
+            lightingStatusEl.textContent = '执行 match 中...';
+            lightingStatusEl.className = 'status streaming';
+            try {
+                const res = await fetch(API + '/learning-path/' + pid + '/flashcard/match?userId=' + uid, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (data.code !== 0) throw new Error(data.message || ('code=' + data.code));
+                setOut(matchOutEl, data.data);
+                lightingStatusEl.textContent = 'match 完成，已持久化并回溯点亮；正在刷新图谱...';
+                lightingStatusEl.className = 'status done';
+                await loadGraph();
+            } catch (e) {
+                lightingStatusEl.textContent = 'match 失败：' + e.message;
+                lightingStatusEl.className = 'status err';
+            }
+        }
+
         btnList.onclick = loadList;
         loadList();
+
+        btnLoadGraph.onclick = loadGraph;
+        btnDoMatch.onclick = doMatch;
     </script>
 </body>
 </html>

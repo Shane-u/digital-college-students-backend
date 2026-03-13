@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS `flashcard_test_question` (
   `userAnswer`    TEXT         NULL COMMENT '用户作答内容',
   `userUploadUrl` VARCHAR(512) NULL COMMENT '用户上传图片URL（编程题拍照）',
   `score`         INT          NOT NULL DEFAULT 0 COMMENT '本题分值',
+  `userScore`     INT          NULL COMMENT '本题得分（批改后写入）',
   `createTime`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updateTime`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   `isDelete`      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否删除',
@@ -73,24 +74,49 @@ CREATE TABLE IF NOT EXISTS `flashcard_test_question` (
 
 
 -- =========================================
+-- 3.1）闪卡测试提交历史表 flashcard_test_attempt（一次 submit 一条记录，可追溯）
+-- =========================================
+CREATE TABLE IF NOT EXISTS `flashcard_test_attempt` (
+  `id`                 BIGINT       NOT NULL COMMENT '主键',
+  `userId`             BIGINT       NOT NULL COMMENT '用户ID',
+  `testId`             BIGINT       NOT NULL COMMENT '所属测试ID（试卷）',
+  `totalScore`         INT          NULL COMMENT '本次提交总分',
+  `pass`               TINYINT(1)   NULL COMMENT '是否通过（>=60）',
+  `aiAdvice`           TEXT         NULL COMMENT 'AI学习建议（本次提交）',
+  `questionResultsJson` LONGTEXT    NULL COMMENT '逐题批改明细快照(JSON)',
+  `createTime`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updateTime`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `isDelete`           TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_flashcard_test_attempt_user` (`userId`),
+  KEY `idx_flashcard_test_attempt_test` (`testId`),
+  KEY `idx_flashcard_test_attempt_time` (`createTime`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='闪卡测试提交历史';
+
+ALTER TABLE `flashcard_test_question`
+  ADD COLUMN `userScore` INT NULL COMMENT '本题得分（批改后写入）' AFTER `score`;
+
+
+-- =========================================
 -- 4）growth_record 表扩展测试相关字段
 --    如已添加过这些列，可按需注释掉对应 ALTER
 -- =========================================
 ALTER TABLE `growth_record`
-  ADD COLUMN IF NOT EXISTS `testId`     BIGINT       NULL COMMENT '关联闪卡测试ID' AFTER `isDelete`;
+  ADD COLUMN `testId`     BIGINT       NULL COMMENT '关联闪卡测试ID' AFTER `isDelete`;
 
 ALTER TABLE `growth_record`
-  ADD COLUMN IF NOT EXISTS `nodeId`     VARCHAR(64)  NULL COMMENT '关联学习节点ID（如闪卡ID）' AFTER `testId`;
+  ADD COLUMN `nodeId`     VARCHAR(64)  NULL COMMENT '关联学习节点ID（如闪卡ID）' AFTER `testId`;
 
 ALTER TABLE `growth_record`
-  ADD COLUMN IF NOT EXISTS `score`      INT          NULL COMMENT '本次测试得分' AFTER `nodeId`;
+  ADD COLUMN `score`      INT          NULL COMMENT '本次测试得分' AFTER `nodeId`;
 
 ALTER TABLE `growth_record`
-  ADD COLUMN IF NOT EXISTS `litStatus`  TINYINT(1)   NULL COMMENT '点亮状态(0-未点亮,1-已点亮)' AFTER `score`;
+  ADD COLUMN `litStatus`  TINYINT(1)   NULL COMMENT '点亮状态(0-未点亮,1-已点亮)' AFTER `score`;
 
 ALTER TABLE `growth_record`
-  ADD COLUMN IF NOT EXISTS `litProgress` INT         NULL COMMENT '点亮进度(0-100，预留)' AFTER `litStatus`;
+  ADD COLUMN `litProgress` INT         NULL COMMENT '点亮进度(0-100，预留)' AFTER `litStatus`;
 
-CREATE INDEX IF NOT EXISTS idx_growth_record_testId ON `growth_record` (`testId`);
-CREATE INDEX IF NOT EXISTS idx_growth_record_nodeId ON `growth_record` (`nodeId`);
+-- 索引：如不支持 IF NOT EXISTS，请先 SHOW INDEX 再创建
+CREATE INDEX idx_growth_record_testId ON `growth_record` (`testId`);
+CREATE INDEX idx_growth_record_nodeId ON `growth_record` (`nodeId`);
 

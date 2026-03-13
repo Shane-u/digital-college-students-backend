@@ -14,6 +14,7 @@ import com.digital.model.vo.LearningPathFlashcardMatchVO;
 import com.digital.model.vo.LearningPathGraphVO;
 import com.digital.service.LearningPathChatPersistenceService;
 import com.digital.service.LearningPathFlashcardMatchService;
+import com.digital.service.LearningPathLightingService;
 import com.digital.service.LearningPathService;
 import com.digital.service.UserService;
 import org.apache.commons.lang3.StringUtils;
@@ -53,6 +54,9 @@ public class LearningPathController {
 
     @Resource
     private LearningPathChatPersistenceService learningPathChatPersistenceService;
+
+    @Resource
+    private LearningPathLightingService learningPathLightingService;
 
     /**
      * 流式规划学习路径
@@ -277,6 +281,14 @@ public class LearningPathController {
         LearningPathFlashcardMatchVO vo = learningPathFlashcardMatchService.matchFlashcards(resolvedUserId, pathId, request);
         if (vo == null) {
             return new BaseResponse<>(ErrorCode.NOT_FOUND_ERROR.getCode(), null, "学习路径不存在");
+        }
+        // match 结果落库并触发点亮回溯（只要前端以该接口返回作为关联依据，就需要长期保存）
+        try {
+            learningPathService.persistFlashcardMatches(resolvedUserId, pathId, vo);
+            learningPathLightingService.recomputePath(resolvedUserId, pathId);
+        } catch (Exception e) {
+            log.error("持久化 match 结果或回溯点亮失败: userId={}, pathId={}, error={}",
+                    resolvedUserId, pathId, e.getMessage(), e);
         }
         return ResultUtils.success(vo);
     }
