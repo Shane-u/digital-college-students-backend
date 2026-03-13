@@ -69,6 +69,11 @@ public class FlashCardTestQuestion implements Serializable {
     private Integer score;
 
     /**
+     * 本题得分（批改后写入）
+     */
+    private Integer userScore;
+
+    /**
      * 创建时间
      */
     private Date createTime;

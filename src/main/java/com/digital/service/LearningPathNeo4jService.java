@@ -1,7 +1,6 @@
 package com.digital.service;
 
 import com.digital.model.dto.learningpath.LearningPathJson;
-import com.digital.model.dto.learningpath.LearningPathNode;
 import com.digital.model.vo.LearningPathGraphVO;
 
 import java.util.List;
@@ -68,4 +67,14 @@ public interface LearningPathNeo4jService {
      * @return 图谱 VO（nodes + relationships），不存在则返回 null
      */
     LearningPathGraphVO getLearningPathGraph(Long userId, String pathId);
+
+    /**
+     * 更新单个学习路径节点的点亮与进度字段（不重建整张图）
+     */
+    void updateNodeLighting(Long userId,
+                            String pathId,
+                            String nodeId,
+                            boolean isLit,
+                            String testPointsProgress,
+                            String childrenProgress);
 }

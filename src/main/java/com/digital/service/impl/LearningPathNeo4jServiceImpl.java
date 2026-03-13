@@ -268,6 +268,48 @@ public class LearningPathNeo4jServiceImpl implements LearningPathNeo4jService {
         }
     }
 
+    @Override
+    public void updateNodeLighting(Long userId,
+                                   String pathId,
+                                   String nodeId,
+                                   boolean isLit,
+                                   String testPointsProgress,
+                                   String childrenProgress) {
+        if (userId == null || pathId == null || pathId.isBlank() || nodeId == null || nodeId.isBlank()) {
+            return;
+        }
+        String dbName = getDatabaseName(userId);
+        ensureDatabaseExists(dbName);
+
+        String tpp = testPointsProgress == null ? "0/0" : testPointsProgress;
+        String cp = childrenProgress == null ? "0/0" : childrenProgress;
+
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(dbName))) {
+            session.executeWrite(tx -> {
+                tx.run(
+                        "MATCH (n:LearningNode {userId: $userId, pathId: $pathId, nodeId: $nodeId}) " +
+                                "SET n.isLit = $isLit, " +
+                                "    n.testPointsProgress = $testPointsProgress, " +
+                                "    n.childrenProgress = $childrenProgress, " +
+                                "    n.litTime = CASE WHEN $isLit = true AND (n.litTime IS NULL OR trim(toString(n.litTime)) = '') THEN datetime() ELSE n.litTime END " +
+                                "RETURN n",
+                        Values.parameters(
+                                "userId", userId,
+                                "pathId", pathId,
+                                "nodeId", nodeId,
+                                "isLit", isLit,
+                                "testPointsProgress", tpp,
+                                "childrenProgress", cp
+                        )
+                );
+                return null;
+            });
+        } catch (Exception e) {
+            log.error("更新学习路径节点点亮失败：userId={}, pathId={}, nodeId={}, error={}",
+                    userId, pathId, nodeId, e.getMessage(), e);
+        }
+    }
+
     private void ensureDatabaseExists(String databaseName) {
         if (defaultDatabase != null && !defaultDatabase.isEmpty() && defaultDatabase.equals(databaseName)) {
             return;

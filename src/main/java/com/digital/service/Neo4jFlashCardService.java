@@ -768,6 +768,108 @@ public class Neo4jFlashCardService {
         }
     }
 
+    /**
+     * 批量获取闪卡点亮状态（用于学习路径叶子节点回溯）
+     */
+    public Map<String, Boolean> getFlashcardLitStatusMap(Long userId, List<String> flashcardIds) {
+        if (userId == null || flashcardIds == null || flashcardIds.isEmpty()) {
+            return Map.of();
+        }
+        String databaseName = defaultDatabase != null && !defaultDatabase.isEmpty()
+                ? defaultDatabase
+                : String.valueOf(userId);
+        ensureDatabaseExists(databaseName);
+
+        String flashCardLabel = "User_" + userId + "_FlashCard";
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            var result = session.run(
+                    "MATCH (card:" + flashCardLabel + " {userId: $userId}) " +
+                            "WHERE card.id IN $ids " +
+                            "RETURN card.id AS id, coalesce(card.litStatus, false) AS lit",
+                    Values.parameters("userId", userId, "ids", flashcardIds)
+            );
+            Map<String, Boolean> map = new HashMap<>();
+            while (result.hasNext()) {
+                var r = result.next();
+                String id = r.get("id").isNull() ? null : r.get("id").asString();
+                boolean lit = !r.get("lit").isNull() && r.get("lit").asBoolean(false);
+                if (id != null) {
+                    map.put(id, lit);
+                }
+            }
+            return map;
+        } catch (Exception e) {
+            log.error("批量获取闪卡点亮状态失败：userId={}, error={}", userId, e.getMessage(), e);
+            return Map.of();
+        }
+    }
+
+    /**
+     * 在 Neo4j 中为指定闪卡创建/更新一个测试点节点，并建立关联关系。
+     * 命名规范：
+     * - 测试点节点 Label: User_{userId}_TestPoint
+     * - 闪卡节点 Label: User_{userId}_FlashCard
+     * 关系：
+     * - (FlashCard)-[:HAS_TEST_POINT]->(TestPoint)
+     *
+     * @param userId      用户 ID
+     * @param nodeId      闪卡节点 ID（与 flashCardId 一致）
+     * @param testId      测试记录 ID（flashcard_test.id）
+     * @param difficulty  测试难度（easy/medium/hard）
+     * @param score       测试得分（0-100）
+     * @param pass        是否及格（>=60）
+     * @param testTimeMs  测试时间（毫秒时间戳）
+     */
+    public void upsertTestPointNode(Long userId,
+                                    String nodeId,
+                                    Long testId,
+                                    String difficulty,
+                                    int score,
+                                    boolean pass,
+                                    Long testTimeMs) {
+        if (userId == null || nodeId == null || nodeId.trim().isEmpty() || testId == null) {
+            return;
+        }
+
+        String databaseName = getDatabaseName(userId);
+        ensureDatabaseExists(databaseName);
+
+        String flashCardLabel = "User_" + userId + "_FlashCard";
+        String testPointLabel = "User_" + userId + "_TestPoint";
+
+        String cypher =
+                "MATCH (card:" + flashCardLabel + " {id: $nodeId, userId: $userId}) " +
+                "MERGE (tp:" + testPointLabel + " {testId: $testId, userId: $userId}) " +
+                "SET tp.nodeId = $nodeId, " +
+                "    tp.difficulty = $difficulty, " +
+                "    tp.score = CASE WHEN coalesce(tp.score, 0) < $score THEN $score ELSE tp.score END, " +
+                "    tp.pass = $pass, " +
+                "    tp.testTime = $testTime " +
+                "MERGE (card)-[:HAS_TEST_POINT]->(tp) " +
+                "RETURN tp";
+
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            try (Transaction tx = session.beginTransaction()) {
+                tx.run(cypher, Values.parameters(
+                        "userId", userId,
+                        "nodeId", nodeId,
+                        "testId", testId,
+                        "difficulty", difficulty,
+                        "score", Math.max(0, Math.min(score, 100)),
+                        "pass", pass,
+                        "testTime", testTimeMs
+                ));
+                tx.commit();
+                log.info("已在 Neo4j 中写入测试点节点：userId={}, nodeId={}, testId={}, difficulty={}, score={}",
+                        userId, nodeId, testId, difficulty, score);
+            }
+        } catch (Exception e) {
+            log.error("写入测试点节点失败：userId={}, nodeId={}, testId={}, error={}",
+                    userId, nodeId, testId, e.getMessage(), e);
+            // 不抛出异常，避免影响主流程
+        }
+    }
+
     public void deleteFlashCardHierarchyFromNeo4j(Long userId, String hierarchyPath) {
         if (hierarchyPath == null || hierarchyPath.trim().isEmpty()) {
             throw new IllegalArgumentException("层级路径不能为空");

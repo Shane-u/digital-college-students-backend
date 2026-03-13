@@ -1,6 +1,7 @@
 package com.digital.model.vo;
 
 import java.io.Serializable;
+import java.util.List;
 import lombok.Builder;
 import lombok.Data;
 
@@ -10,6 +11,11 @@ import lombok.Data;
 @Data
 @Builder
 public class FlashCardTestResultVO implements Serializable {
+
+    /**
+     * 本次提交 ID（attemptId，可追溯）
+     */
+    private Long submitId;
 
     /**
      * 测试 ID
@@ -40,6 +46,11 @@ public class FlashCardTestResultVO implements Serializable {
      * 当前节点亮度 / 进度（0-100，一般等于本次得分）
      */
     private Integer litProgress;
+
+    /**
+     * 逐题批改明细
+     */
+    private List<FlashCardTestQuestionResultVO> questionResults;
 
     private static final long serialVersionUID = 1L;
 }
