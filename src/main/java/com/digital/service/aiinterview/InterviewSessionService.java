@@ -50,5 +50,20 @@ public interface InterviewSessionService {
      * @param beforeId 游标：返回 reportId < beforeId 的数据（可选）
      */
     List<InterviewReportSummaryVO> listReports(Long userId, Integer limit, Long beforeId);
+
+    /**
+     * 删除当前用户的一条面试报告（逻辑删除）
+     *
+     * @param userId   当前用户 ID
+     * @param reportId 报告 ID
+     */
+    void deleteReport(Long userId, Long reportId);
+
+    /**
+     * 清空当前用户的全部面试报告（逻辑删除）
+     *
+     * @param userId 当前用户 ID
+     */
+    void clearReports(Long userId);
 }
 

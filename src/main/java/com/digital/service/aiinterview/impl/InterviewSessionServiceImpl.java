@@ -1,6 +1,7 @@
 package com.digital.service.aiinterview.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.digital.common.ErrorCode;
 import com.digital.exception.BusinessException;
 import com.digital.exception.ThrowUtils;
@@ -244,6 +245,42 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
             vo.setUpdateTime(r.getUpdateTime());
             return vo;
         }).collect(Collectors.toList());
+    }
+
+    @Override
+    public void deleteReport(Long userId, Long reportId) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户 ID 不能为空");
+        ThrowUtils.throwIf(reportId == null, ErrorCode.PARAMS_ERROR, "reportId 不能为空");
+
+        InterviewReport report = reportMapper.selectById(reportId);
+        if (report == null || report.getIsDelete() != null && report.getIsDelete() == 1) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "面试报告不存在");
+        }
+        Long ownerId = report.getUserId();
+        if (ownerId == null || !ownerId.equals(userId)) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "不能删除他人的面试报告");
+        }
+
+        // 逻辑删除：显式设置 isDelete，保持与其他模块风格一致
+        Date now = new Date();
+        UpdateWrapper<InterviewReport> uw = new UpdateWrapper<>();
+        uw.eq("id", reportId);
+        uw.set("isDelete", 1);
+        uw.set("updateTime", now);
+        reportMapper.update(null, uw);
+    }
+
+    @Override
+    public void clearReports(Long userId) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户 ID 不能为空");
+
+        Date now = new Date();
+        UpdateWrapper<InterviewReport> uw = new UpdateWrapper<>();
+        uw.eq("userId", userId);
+        uw.eq("isDelete", 0);
+        uw.set("isDelete", 1);
+        uw.set("updateTime", now);
+        reportMapper.update(null, uw);
     }
 
     private InterviewReportVO generateOrGetReport(Long userId, Long sessionId, boolean generateIfMissing) {
