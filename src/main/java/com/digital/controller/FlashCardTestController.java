@@ -20,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -139,6 +140,20 @@ public class FlashCardTestController {
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "试卷不存在");
         }
         return ResultUtils.success(vo);
+    }
+
+    /**
+     * 删除试卷（逻辑删除 MySQL 主表+题目+提交历史，同步删除 Neo4j 测试点节点，并重算闪卡/学习路径点亮）
+     */
+    @DeleteMapping("/{testId}")
+    public BaseResponse<Boolean> deletePaper(@PathVariable Long testId,
+                                             HttpServletRequest httpServletRequest) {
+        if (testId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "testId 不能为空");
+        }
+        User loginUser = userService.getLoginUser(httpServletRequest);
+        flashCardTestService.deletePaper(loginUser.getId(), testId);
+        return ResultUtils.success(true);
     }
 }
 

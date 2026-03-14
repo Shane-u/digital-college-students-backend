@@ -48,5 +48,10 @@ public interface FlashCardTestService {
      * 加载历史试卷题目（不带历史作答/得分），用于重做
      */
     FlashCardTestVO loadPaper(Long userId, Long testId);
+
+    /**
+     * 删除试卷（逻辑删除 MySQL 主表+题目+提交历史，并删除 Neo4j 测试点节点；删除后重算闪卡点亮）
+     */
+    void deletePaper(Long userId, Long testId);
 }
 

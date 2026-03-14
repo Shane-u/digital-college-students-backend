@@ -1,6 +1,7 @@
 package com.digital.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.digital.common.ErrorCode;
 import com.digital.exception.BusinessException;
 import com.digital.manager.DoubaoManager;
@@ -876,6 +877,58 @@ public class FlashCardTestServiceImpl implements FlashCardTestService {
         }
         vo.setQuestions(qvos);
         return vo;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deletePaper(Long userId, Long testId) {
+        if (userId == null || testId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数不能为空");
+        }
+        FlashCardTest test = flashCardTestMapper.selectById(testId);
+        if (test == null || !userId.equals(test.getUserId())) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "试卷不存在或无权操作");
+        }
+        String nodeId = test.getNodeId();
+        Date now = new Date();
+
+        // 1. MySQL 逻辑删除：主表 + 题目 + 提交历史
+        test.setIsDelete(1);
+        test.setUpdateTime(now);
+        flashCardTestMapper.updateById(test);
+
+        UpdateWrapper<FlashCardTestQuestion> qw = new UpdateWrapper<>();
+        qw.eq("testId", testId);
+        qw.set("isDelete", 1);
+        qw.set("updateTime", now);
+        flashCardTestQuestionMapper.update(null, qw);
+
+        UpdateWrapper<FlashCardTestAttempt> aw = new UpdateWrapper<>();
+        aw.eq("testId", testId);
+        aw.set("isDelete", 1);
+        aw.set("updateTime", now);
+        flashCardTestAttemptMapper.update(null, aw);
+
+        // 2. Neo4j 删除该试卷对应的测试点节点
+        try {
+            neo4jFlashCardService.deleteTestPointNode(userId, testId);
+        } catch (Exception e) {
+            log.error("删除 Neo4j 测试点节点失败: testId={}, error={}", testId, e.getMessage(), e);
+        }
+
+        // 3. 重算该闪卡的点亮状态（少了一套试卷后比例会变）
+        try {
+            recomputeFlashCardLitFromTests(userId, nodeId);
+        } catch (Exception e) {
+            log.error("删除试卷后重算闪卡点亮失败: userId={}, nodeId={}, error={}", userId, nodeId, e.getMessage(), e);
+        }
+
+        // 4. 学习路径节点点亮回溯（若该闪卡关联了学习路径叶子）
+        try {
+            learningPathLightingService.recomputeByFlashcard(userId, nodeId);
+        } catch (Exception e) {
+            log.error("删除试卷后回溯学习路径点亮失败: userId={}, nodeId={}, error={}", userId, nodeId, e.getMessage(), e);
+        }
     }
 
     /**
