@@ -892,10 +892,12 @@ public class FlashCardTestServiceImpl implements FlashCardTestService {
         String nodeId = test.getNodeId();
         Date now = new Date();
 
-        // 1. MySQL 逻辑删除：主表 + 题目 + 提交历史
-        test.setIsDelete(1);
-        test.setUpdateTime(now);
-        flashCardTestMapper.updateById(test);
+        // 1. MySQL 逻辑删除：主表 + 题目 + 提交历史（主表用 UpdateWrapper 显式 set isDelete，避免 @TableLogic 被 MP 在 updateById 时忽略）
+        UpdateWrapper<FlashCardTest> tw = new UpdateWrapper<>();
+        tw.eq("id", testId);
+        tw.set("isDelete", 1);
+        tw.set("updateTime", now);
+        flashCardTestMapper.update(null, tw);
 
         UpdateWrapper<FlashCardTestQuestion> qw = new UpdateWrapper<>();
         qw.eq("testId", testId);
