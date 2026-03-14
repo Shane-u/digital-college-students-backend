@@ -6,6 +6,7 @@ import com.digital.model.dto.learningpath.LearningPathJson;
 import com.digital.model.entity.LearningPath;
 import com.digital.model.vo.LearningPathGraphVO;
 import com.digital.model.vo.LearningPathFlashcardMatchVO;
+import com.digital.model.vo.LearningPathRecommendVO;
 
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -96,4 +97,13 @@ public interface LearningPathService {
      * 将 matchFlashcards 的返回结果持久化为“学习路径节点↔闪卡”关联
      */
     void persistFlashcardMatches(Long userId, String pathId, LearningPathFlashcardMatchVO vo);
+
+    /**
+     * 根据当前用户传入的知识主题，生成建议向 AI 提问的推荐学习知识点列表（以求知姿态表述，供拿去问别的 AI）
+     *
+     * @param userId 用户 ID
+     * @param topic  知识主题
+     * @return 结构化的推荐知识点列表，每条含 title、question
+     */
+    LearningPathRecommendVO recommendKnowledgeQuestions(Long userId, String topic);
 }
