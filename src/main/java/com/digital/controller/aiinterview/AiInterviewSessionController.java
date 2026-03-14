@@ -136,6 +136,29 @@ public class AiInterviewSessionController {
         return ResultUtils.success(sessionService.listReports(resolvedUserId, limit, beforeId));
     }
 
+    /**
+     * 删除当前用户的一条面试报告（逻辑删除）
+     */
+    @DeleteMapping("/reports/{reportId}")
+    public BaseResponse<Boolean> deleteReport(@PathVariable Long reportId,
+                                              @RequestParam(value = "userId", required = false) Long userId,
+                                              HttpServletRequest request) {
+        Long resolvedUserId = resolveUserId(request, userId);
+        sessionService.deleteReport(resolvedUserId, reportId);
+        return ResultUtils.success(true);
+    }
+
+    /**
+     * 清空当前用户的全部面试报告（逻辑删除）
+     */
+    @DeleteMapping("/reports")
+    public BaseResponse<Boolean> clearReports(@RequestParam(value = "userId", required = false) Long userId,
+                                              HttpServletRequest request) {
+        Long resolvedUserId = resolveUserId(request, userId);
+        sessionService.clearReports(resolvedUserId);
+        return ResultUtils.success(true);
+    }
+
     private Long resolveUserId(HttpServletRequest request, Long userId) {
         Long resolved = null;
         try {

@@ -106,4 +106,14 @@ public interface LearningPathService {
      * @return 结构化的推荐知识点列表，每条含 title、question
      */
     LearningPathRecommendVO recommendKnowledgeQuestions(Long userId, String topic);
+
+    /**
+     * 重命名学习路径的 topic（Saga：先更新 Neo4j，再更新 MySQL）
+     *
+     * @param userId  用户 ID
+     * @param pathId  路径 ID
+     * @param newTopic 新的主题名称
+     * @return 是否成功
+     */
+    boolean renameTopic(Long userId, String pathId, String newTopic);
 }
