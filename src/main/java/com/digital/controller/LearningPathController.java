@@ -7,11 +7,13 @@ import com.digital.exception.BusinessException;
 import com.digital.model.dto.learningpath.LearningPathJson;
 import com.digital.model.dto.learningpath.LearningPathFlashcardMatchRequest;
 import com.digital.model.dto.learningpath.LearningPathPlanRequest;
+import com.digital.model.dto.learningpath.LearningPathRecommendRequest;
 import com.digital.model.dto.learningpath.LearningPathSaveRequest;
 import com.digital.model.entity.LearningPath;
 import com.digital.model.entity.User;
 import com.digital.model.vo.LearningPathFlashcardMatchVO;
 import com.digital.model.vo.LearningPathGraphVO;
+import com.digital.model.vo.LearningPathRecommendVO;
 import com.digital.service.LearningPathChatPersistenceService;
 import com.digital.service.LearningPathFlashcardMatchService;
 import com.digital.service.LearningPathLightingService;
@@ -319,6 +321,22 @@ public class LearningPathController {
         Long resolvedUserId = resolveUserId(userId, httpRequest);
         boolean ok = learningPathService.updatePathJson(resolvedUserId, pathId, pathJson);
         return ResultUtils.success(ok);
+    }
+
+    /**
+     * 根据知识主题生成「建议向 AI 提问」的推荐学习知识点列表（求知姿态，供用户拿去问别的 AI）
+     * 仿照豆包聊天接口，调用 Doubao 生成结构化 JSON。
+     */
+    @PostMapping("/recommend-questions")
+    public BaseResponse<LearningPathRecommendVO> recommendKnowledgeQuestions(@RequestBody LearningPathRecommendRequest request,
+                                                                             @RequestParam(required = false) Long userId,
+                                                                             HttpServletRequest httpRequest) {
+        Long resolvedUserId = resolveUserId(userId, httpRequest);
+        if (request == null || StringUtils.isBlank(request.getTopic())) {
+            return new BaseResponse<>(ErrorCode.PARAMS_ERROR.getCode(), null, "知识主题不能为空");
+        }
+        LearningPathRecommendVO vo = learningPathService.recommendKnowledgeQuestions(resolvedUserId, request.getTopic().trim());
+        return ResultUtils.success(vo);
     }
 
     /**

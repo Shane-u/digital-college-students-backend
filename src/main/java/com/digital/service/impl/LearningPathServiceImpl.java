@@ -3,8 +3,10 @@ package com.digital.service.impl;
 import com.digital.exception.BusinessException;
 import com.digital.common.ErrorCode;
 import com.digital.exception.ThrowUtils;
+import com.digital.manager.DoubaoManager;
 import com.digital.manager.SiliconFlowManager;
 import com.digital.model.dto.chat.ChatRequest;
+import com.digital.model.dto.chat.ChatResponse;
 import com.digital.model.dto.chat.Message;
 import com.digital.model.dto.learningpath.LearningPathJson;
 import com.digital.model.dto.learningpath.LearningPathPlanRequest;
@@ -12,10 +14,12 @@ import com.digital.model.dto.learningpath.LearningPathSaveRequest;
 import com.digital.model.entity.LearningPath;
 import com.digital.model.vo.LearningPathGraphVO;
 import com.digital.model.vo.LearningPathFlashcardMatchVO;
+import com.digital.model.vo.LearningPathRecommendVO;
 import com.digital.mapper.LearningPathMapper;
 import com.digital.mapper.LearningPathFlashcardMatchMapper;
 import com.digital.service.LearningPathNeo4jService;
 import com.digital.service.LearningPathService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -79,6 +83,9 @@ public class LearningPathServiceImpl implements LearningPathService {
 
     @Resource
     private SiliconFlowManager siliconFlowManager;
+
+    @Resource
+    private DoubaoManager doubaoManager;
 
     @Resource
     private LearningPathMapper learningPathMapper;
@@ -441,5 +448,92 @@ public class LearningPathServiceImpl implements LearningPathService {
             return null;
         }
         return learningPathNeo4jService.getLearningPathGraph(userId, pathId);
+    }
+
+    private static final String RECOMMEND_SYSTEM_PROMPT = """
+            你是一个学习路径助手。根据用户给出的「知识主题」，生成一份「建议向 AI 提问的推荐学习知识点列表」。
+            这些知识点会由用户拿去问别的 AI（如问答机器人），因此每条都要以「求知的姿态」表述：即像学习者向老师/AI 提问那样，写成具体、可回答的问题或学习点。
+            要求：
+            1. 只输出一个合法的 JSON，不要输出 markdown 代码块、解释或其它文字。
+            2. JSON 格式必须为：{"items":[{"title":"知识点标题或分类","question":"建议向 AI 提问的问题（求知口吻）"}, ...]}
+            3. items 数量建议 5～15 条，覆盖该主题下从基础到进阶的典型问题。
+            4. question 字段必须是完整的、可直接拿去问 AI 的句子，例如：「什么是 XXX？请用简单例子说明」「如何实现 XXX？步骤是什么」。
+            """;
+
+    @Override
+    public LearningPathRecommendVO recommendKnowledgeQuestions(Long userId, String topic) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户 ID 不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(topic), ErrorCode.PARAMS_ERROR, "知识主题不能为空");
+
+        LearningPathRecommendVO vo = new LearningPathRecommendVO();
+        vo.setItems(new ArrayList<>());
+
+        ChatRequest chatRequest = new ChatRequest();
+        chatRequest.setStream(false);
+        chatRequest.setUserId(userId);
+        chatRequest.setMessages(List.of(
+                Message.system(RECOMMEND_SYSTEM_PROMPT),
+                Message.user("请根据以下知识主题，生成建议向 AI 提问的推荐学习知识点列表（JSON 格式）：\n\n主题：" + topic.trim())
+        ));
+
+        try {
+            ChatResponse resp = doubaoManager.chat(chatRequest);
+            String content = resp != null ? resp.getContent() : null;
+            if (StringUtils.isBlank(content)) {
+                return vo;
+            }
+            String jsonStr = extractRecommendJson(content);
+            if (jsonStr == null) {
+                return vo;
+            }
+            JsonNode root = objectMapper.readTree(jsonStr);
+            JsonNode itemsNode = root.path("items");
+            if (!itemsNode.isArray()) {
+                return vo;
+            }
+            List<LearningPathRecommendVO.RecommendItem> items = new ArrayList<>();
+            for (JsonNode item : itemsNode) {
+                LearningPathRecommendVO.RecommendItem ri = new LearningPathRecommendVO.RecommendItem();
+                ri.setTitle(item.path("title").asText(""));
+                ri.setQuestion(item.path("question").asText(""));
+                items.add(ri);
+            }
+            vo.setItems(items);
+        } catch (Exception e) {
+            log.warn("推荐知识点生成失败: userId={}, topic={}, error={}", userId, topic, e.getMessage());
+        }
+        return vo;
+    }
+
+    /**
+     * 从 AI 返回文本中提取推荐列表的 JSON（去除 ```json 等包裹）
+     */
+    private String extractRecommendJson(String content) {
+        if (content == null) {
+            return null;
+        }
+        String s = content.trim();
+        if (s.isEmpty()) {
+            return null;
+        }
+        if (s.startsWith("```")) {
+            int first = s.indexOf('\n');
+            if (first > 0) {
+                int end = s.indexOf("```", first);
+                if (end > first) {
+                    s = s.substring(first, end).trim();
+                } else {
+                    s = s.substring(first).trim();
+                }
+            } else {
+                s = s.replaceFirst("^```\\w*", "").replaceAll("```\\s*$", "").trim();
+            }
+        }
+        try {
+            objectMapper.readTree(s);
+            return s;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
