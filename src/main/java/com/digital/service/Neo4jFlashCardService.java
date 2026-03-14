@@ -870,6 +870,32 @@ public class Neo4jFlashCardService {
         }
     }
 
+    /**
+     * 删除 Neo4j 中指定试卷（testId）对应的测试点节点，与 MySQL 试卷删除同步。
+     */
+    public void deleteTestPointNode(Long userId, Long testId) {
+        if (userId == null || testId == null) {
+            return;
+        }
+        String databaseName = getDatabaseName(userId);
+        ensureDatabaseExists(databaseName);
+        String testPointLabel = "User_" + userId + "_TestPoint";
+        try (Session session = neo4jDriver.session(SessionConfig.forDatabase(databaseName))) {
+            session.executeWrite(tx -> {
+                tx.run(
+                        "MATCH (tp:" + testPointLabel + " {testId: $testId, userId: $userId}) " +
+                                "DETACH DELETE tp",
+                        Values.parameters("userId", userId, "testId", testId)
+                );
+                return null;
+            });
+            log.info("已从 Neo4j 删除测试点节点：userId={}, testId={}", userId, testId);
+        } catch (Exception e) {
+            log.error("删除 Neo4j 测试点节点失败：userId={}, testId={}, error={}",
+                    userId, testId, e.getMessage(), e);
+        }
+    }
+
     public void deleteFlashCardHierarchyFromNeo4j(Long userId, String hierarchyPath) {
         if (hierarchyPath == null || hierarchyPath.trim().isEmpty()) {
             throw new IllegalArgumentException("层级路径不能为空");

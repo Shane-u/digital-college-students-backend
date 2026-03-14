@@ -108,7 +108,10 @@
             <div class="row g-2">
               <div class="col-12 col-lg-6">
                 <label class="form-label">历史试卷（选择一套 testId）</label>
-                <select id="paperSelect" class="form-select" onchange="onPaperChanged()"></select>
+                <div class="d-flex gap-2 align-items-center">
+                  <select id="paperSelect" class="form-select flex-grow-1" onchange="onPaperChanged()"></select>
+                  <button type="button" class="btn btn-outline-danger" onclick="deleteSelectedPaper()" title="逻辑删除试卷（MySQL+Neo4j 同步）">删除试卷</button>
+                </div>
               </div>
               <div class="col-12 col-lg-6">
                 <label class="form-label">提交历史（attempts）</label>
@@ -319,6 +322,27 @@
       }
     } catch (e) {
       alert('加载历史试卷失败: ' + e.message);
+    }
+  }
+
+  async function deleteSelectedPaper() {
+    const testId = $('paperSelect').value;
+    if (!testId) {
+      alert('请先选择要删除的试卷');
+      return;
+    }
+    if (!confirm('确定删除该试卷？将逻辑删除 MySQL 主表/题目/提交历史，并删除 Neo4j 测试点节点。')) return;
+    try {
+      await apiFetch('/flash-card/test/' + testId, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      $('attemptsOut').textContent = '';
+      $('bestQuestionsOut').textContent = '';
+      await loadPapers();
+      alert('删除成功');
+    } catch (e) {
+      alert('删除失败: ' + e.message);
     }
   }
 
