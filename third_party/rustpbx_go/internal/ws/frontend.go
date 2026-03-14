@@ -27,7 +27,9 @@ type FrontendServer struct {
 	conn              *websocket.Conn
 	RealTimeConn      *websocket.Conn
 	llm               *handler.LLMHandler
-	siliconFlowLLM    *handler.SiliconFlowHandler // shane: siliconflow LLM handler
+	siliconFlowToolsLLM *handler.SiliconFlowHandler // 带 tools 的通用智能体（语音控制/通用对话）
+	newInterviewer      func() *handler.SiliconFlowInterviewer
+	interviewer         *handler.SiliconFlowInterviewer // 面试官（无 tools；每次通话独立实例）
 	backendConn       *websocket.Conn             // shane: 与后端的连接
 	backendServer     *BackendServer              // shane: 后端服务实例
 	codec             string                      // shane: codec for audio stream
@@ -38,26 +40,32 @@ type FrontendServer struct {
 	currentSessionId  string
 	currentUserId     int64
 	currentQuestionId string
+	interviewPrompt   string
+	questionCount     int
+	pendingEndAfterAnswer bool
+	interviewFinished bool
 	mu                sync.Mutex // shane: solve the concurrent write problem
 	writeMu           sync.Mutex // shane: 专门用于保护 WebSocket 写入操作的锁
 }
 
-func NewFrontendServer(llm *handler.LLMHandler, siliconFlowLLM *handler.SiliconFlowHandler, backendConn *websocket.Conn, backendServer *BackendServer, codec string, asrOption *pbx_back_end.ASROption, ttsOption *pbx_back_end.TTSOption, javaBaseURL string, javaToken string) *FrontendServer {
+func NewFrontendServer(llm *handler.LLMHandler, siliconFlowToolsLLM *handler.SiliconFlowHandler, newInterviewer func() *handler.SiliconFlowInterviewer, interviewPrompt string, backendConn *websocket.Conn, backendServer *BackendServer, codec string, asrOption *pbx_back_end.ASROption, ttsOption *pbx_back_end.TTSOption, javaBaseURL string, javaToken string) *FrontendServer {
 	// func NewFrontendServer(llm *handler.LLMHandler, siliconFlowLLM *handler.SiliconFlowHandler, codec string, asrOption *pbx_back_end.ASROption, ttsOption *pbx_back_end.TTSOption) *FrontendServer {
 	return &FrontendServer{
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true }, // shane: 允许跨域
 		}, // http的升级
-		clients:        make(map[*websocket.Conn]bool),
-		llm:            llm,
-		siliconFlowLLM: siliconFlowLLM, // shane: siliconflow LLM handler
-		backendConn:    backendConn,
-		backendServer:  backendServer,
-		codec:          codec,
-		asrOption:      asrOption,
-		ttsOption:      ttsOption,
-		javaBaseURL:    strings.TrimRight(javaBaseURL, "/"),
-		javaToken:      javaToken,
+		clients:            make(map[*websocket.Conn]bool),
+		llm:                llm,
+		siliconFlowToolsLLM: siliconFlowToolsLLM,
+		newInterviewer:      newInterviewer,
+		backendConn:         backendConn,
+		backendServer:       backendServer,
+		codec:               codec,
+		asrOption:           asrOption,
+		ttsOption:           ttsOption,
+		javaBaseURL:         strings.TrimRight(javaBaseURL, "/"),
+		javaToken:           javaToken,
+		interviewPrompt:     interviewPrompt,
 	}
 }
 
@@ -182,6 +190,13 @@ func (s *FrontendServer) handleAiInterviewWS(c *gin.Context) {
 	s.RealTimeConn = conn
 	s.currentSessionId = sessionID
 	s.currentUserId = authData.UserID
+	s.currentQuestionId = ""
+	s.questionCount = 0
+	s.pendingEndAfterAnswer = false
+	s.interviewFinished = false
+	if s.newInterviewer != nil {
+		s.interviewer = s.newInterviewer()
+	}
 	remoteAddr := conn.RemoteAddr().String()
 	s.mu.Unlock()
 
@@ -206,6 +221,9 @@ func (s *FrontendServer) handleAiInterviewWS(c *gin.Context) {
 		delete(s.clients, conn)
 		if s.RealTimeConn == conn {
 			s.RealTimeConn = nil
+		}
+		if s.interviewer != nil {
+			s.interviewer = nil
 		}
 		s.mu.Unlock()
 		logrus.Info("ai-interview ws connection closed")
@@ -552,8 +570,10 @@ func (s *FrontendServer) ReceiveRealTimeMessage(conn *websocket.Conn, done chan 
 			// bind current question for realtime ASR -> Java 上传文本答案
 			if frontendEvent.Event == "bindQuestion" && frontendEvent.QuestionId != "" {
 				s.mu.Lock()
+				// realtime 通话可能不绑定题目。即使绑定，也只用于 Java 侧答案落库，不用于“问了几题”的统计。
 				s.currentQuestionId = frontendEvent.QuestionId
 				s.mu.Unlock()
+
 				logrus.Infof("bindQuestion: questionId=%s", frontendEvent.QuestionId)
 				continue
 			}
@@ -665,7 +685,7 @@ func (s *FrontendServer) SendMessages(conn *websocket.Conn, msg []byte) {
 	}
 
 	// shane: Stream Query
-	response, err := s.siliconFlowLLM.QueryStream(string(msg), ttsCallback)
+	response, err := s.siliconFlowToolsLLM.QueryStream(string(msg), ttsCallback)
 	if err != nil {
 		logrus.Error("LLM stream query failed:", err)
 		return
@@ -724,13 +744,15 @@ func (s *FrontendServer) receiveBackendMessages() {
 				go s.sendTextAnswerToJava(event.Text)
 
 				// shane: use LLM to handle ASR result
-				if s.siliconFlowLLM != nil {
-					IsStreaming := true
-					if IsStreaming {
-						go s.handleASRWithStream(event.Text)
-					} else {
-						go s.handleASRWithNormal(event.Text)
-					}
+				// - ai-interview：使用面试官（无 tools）
+				// - 其他 realtime：使用带 tools 的语音控制智能体
+				s.mu.Lock()
+				intv := s.interviewer
+				s.mu.Unlock()
+				if intv != nil {
+					go s.handleASRWithStream(event.Text)
+				} else if s.siliconFlowToolsLLM != nil {
+					go s.handleASRWithToolsStream(event.Text)
 				}
 			} else if event.Event == "asrDelta" {
 				// shane: handle ASR delta event
@@ -757,6 +779,19 @@ func (s *FrontendServer) receiveBackendMessages() {
 // handleASRWithStream shane: use stream LLM handle ASR result
 func (s *FrontendServer) handleASRWithStream(asrText string) {
 	logrus.Info("handle ASR result via streaming LLM...")
+
+	s.mu.Lock()
+	finished := s.interviewFinished
+	pendingEnd := s.pendingEndAfterAnswer
+	s.mu.Unlock()
+	if finished {
+		return
+	}
+	// 已问满 5 题后：收到候选人下一次回答则结束面试（不再继续追问）
+	if pendingEnd {
+		s.endInterview("question_limit_reached")
+		return
+	}
 
 	// shane: define TTS callback function
 	ttsCallback := func(segment string, playID string, autoHangup bool) error {
@@ -821,20 +856,34 @@ func (s *FrontendServer) handleASRWithStream(asrText string) {
 		return
 	}
 
-	// 构造面试官专用 prompt：在通用对话前拼上 interviewPrompt 和当前回答
+	// 构造面试官专用 user message（system prompt 已在 interviewer 内部设置）
 	userMsg := asrText
-	if s.siliconFlowLLM != nil {
-		if ip := s.siliconFlowLLM.GetInterviewPrompt(); ip != "" {
-			userMsg = ip + "\n\n候选人本轮回答：" + asrText
-		}
+	if strings.TrimSpace(s.interviewPrompt) != "" {
+		userMsg = s.interviewPrompt + "\n\n候选人本轮回答：" + asrText
 	}
 
 	// shane: use streaming query
-	response, err := s.siliconFlowLLM.QueryStream(userMsg, ttsCallback)
+	s.mu.Lock()
+	intv := s.interviewer
+	s.mu.Unlock()
+	if intv == nil {
+		return
+	}
+	response, err := intv.QueryStream(userMsg, ttsCallback)
 	if err != nil {
 		logrus.Error("LLM handle ASR result failed:", err)
 	} else {
 		logrus.Infof("LLM stream response completed: %s", response)
+		// 统计“问了几题”：不依赖 questionId，按面试官每次提问轮次计数（系统提示词约束每次只问1题）
+		s.mu.Lock()
+		if strings.TrimSpace(response) != "" {
+			s.questionCount++
+			if s.questionCount >= 5 {
+				s.pendingEndAfterAnswer = true
+			}
+		}
+		s.mu.Unlock()
+
 		// 持久化 AI 回复到 Java MongoDB，供报告分析使用
 		go s.sendAssistantMessageToJava(response)
 		// shane: send final llm response to frontend - 使用线程安全的写入方法
@@ -849,11 +898,72 @@ func (s *FrontendServer) handleASRWithStream(asrText string) {
 	}
 }
 
+// handleASRWithToolsStream realtime 语音控制/通用对话：使用带 tools 的智能体，并把回复回传前端
+func (s *FrontendServer) handleASRWithToolsStream(asrText string) {
+	logrus.Info("handle ASR result via streaming tools LLM...")
+
+	ttsCallback := func(segment string, playID string, autoHangup bool) error {
+		ttsCmd := pbx_back_end.TtsCommand{
+			Command:     "tts",
+			Text:        segment,
+			Speaker:     s.ttsOption.Speaker,
+			PlayID:      playID,
+			AutoHangup:  autoHangup,
+			Streaming:   true,
+			EndOfStream: false,
+			Option:      s.ttsOption,
+		}
+		cmdBytes, err := json.Marshal(ttsCmd)
+		if err != nil {
+			logrus.Error("generate TTS Command failed:", err)
+			return err
+		}
+
+		if s.backendConn == nil {
+			logrus.Error("backendConn is nil, attempting to reconnect...")
+			if err := s.backendServer.reconnect("webrtc"); err != nil {
+				logrus.Errorf("reconnect to backend failed: %v", err)
+				return err
+			}
+			s.backendConn = s.backendServer.Conn
+			logrus.Info("reconnected to backend successfully.")
+		}
+
+		if err := s.backendConn.WriteMessage(websocket.TextMessage, cmdBytes); err != nil {
+			logrus.Error("send TTS command to Rust backend failed:", err)
+			return err
+		}
+
+		streamEvent := map[string]interface{}{
+			"event":  "llmStream",
+			"text":   segment,
+			"playID": playID,
+			"final":  autoHangup,
+		}
+		eventBytes, _ := json.Marshal(streamEvent)
+		_ = s.safeWriteToRealTimeConn(websocket.TextMessage, eventBytes)
+		return nil
+	}
+
+	response, err := s.siliconFlowToolsLLM.QueryStream(asrText, ttsCallback)
+	if err != nil {
+		logrus.Error("tools LLM handle ASR result failed:", err)
+		return
+	}
+	finalEvent := map[string]interface{}{
+		"event": "llmFinal",
+		"text":  response,
+	}
+	if eventBytes, err := json.Marshal(finalEvent); err == nil {
+		_ = s.safeWriteToRealTimeConn(websocket.TextMessage, eventBytes)
+	}
+}
+
 // handleASRWithNormal shane: use normal LLM handle asr result
 func (s *FrontendServer) handleASRWithNormal(asrText string) {
 	logrus.Info("handle ASR result via normal LLM...")
 
-	response, err := s.siliconFlowLLM.Query(asrText)
+	response, err := s.siliconFlowToolsLLM.Query(asrText)
 	// response, _, err := s.llm.Query("qwen-turbo", event.Text)
 	if err != nil {
 		logrus.Error("LLM handle ASR result failed:", err)
@@ -881,6 +991,44 @@ func (s *FrontendServer) handleASRWithNormal(asrText string) {
 			} else {
 				logrus.Info("TTS command sent to Rust backend successfully")
 			}
+		}
+	}
+}
+
+func (s *FrontendServer) endInterview(reason string) {
+	s.mu.Lock()
+	if s.interviewFinished {
+		s.mu.Unlock()
+		return
+	}
+	s.interviewFinished = true
+	s.mu.Unlock()
+
+	ending := "本次面试已完成，感谢你的回答。接下来我们将结束通话。"
+
+	// best-effort: 通知前端
+	endEvent := map[string]interface{}{
+		"event":  "interviewEnded",
+		"reason": reason,
+	}
+	if eventBytes, err := json.Marshal(endEvent); err == nil {
+		_ = s.safeWriteToRealTimeConn(websocket.TextMessage, eventBytes)
+	}
+
+	// best-effort: 发送 TTS + 自动挂断
+	if s.backendConn != nil {
+		ttsCmd := pbx_back_end.TtsCommand{
+			Command:     "tts",
+			Text:        ending,
+			Speaker:     s.ttsOption.Speaker,
+			PlayID:      fmt.Sprintf("sf-end-%d", time.Now().UnixNano()),
+			AutoHangup:  true,
+			Streaming:   true,
+			EndOfStream: true,
+			Option:      s.ttsOption,
+		}
+		if cmdBytes, err := json.Marshal(ttsCmd); err == nil {
+			_ = s.backendConn.WriteMessage(websocket.TextMessage, cmdBytes)
 		}
 	}
 }

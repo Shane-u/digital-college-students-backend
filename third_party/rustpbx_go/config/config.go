@@ -76,6 +76,8 @@ type LLMConfig struct {
 		URL             string
 		Model           string
 		SystemPrompt    string
+		InterviewModel  string
+		InterviewSystemPrompt string
 		InterviewPrompt string
 	}
 }
@@ -235,6 +237,8 @@ func LoadConfig() (*Config, error) {
 	config.LLM.SiliconFlow.URL = getEnv("LLM_SILICONFLOW_URL", "https://api.siliconflow.cn/v1/chat/completions")
 	config.LLM.SiliconFlow.Model = getEnv("LLM_SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 	config.LLM.SiliconFlow.SystemPrompt = getEnv("LLM_SILICONFLOW_SYSTEM_PROMPT", "You are a helpful assistant. Provide concise responses. Use 'hangup' tool when the conversation is complete. 如果我说使用联网搜索那你就使用这个search online这个工具，如果我说生成图片那你就使用generate image这个工具.please use Chinese to replay!! 铭记使用中文回答！！")
+	config.LLM.SiliconFlow.InterviewModel = getEnv("LLM_SILICONFLOW_INTERVIEW_MODEL", config.LLM.SiliconFlow.Model)
+	config.LLM.SiliconFlow.InterviewSystemPrompt = getEnv("LLM_SILICONFLOW_INTERVIEW_SYSTEM_PROMPT", "你是一个严谨的中文面试官。你不调用任何工具。你的目标是逐步提问并评估候选人。每次只问一个问题，保持问题清晰简短。")
 	config.LLM.SiliconFlow.InterviewPrompt = getEnv("LLM_SILICONFLOW_INTERVIEW_PROMPT", "")
 
 	return config, nil

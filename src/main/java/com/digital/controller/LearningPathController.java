@@ -8,6 +8,7 @@ import com.digital.model.dto.learningpath.LearningPathJson;
 import com.digital.model.dto.learningpath.LearningPathFlashcardMatchRequest;
 import com.digital.model.dto.learningpath.LearningPathPlanRequest;
 import com.digital.model.dto.learningpath.LearningPathRecommendRequest;
+import com.digital.model.dto.learningpath.LearningPathRenameTopicRequest;
 import com.digital.model.dto.learningpath.LearningPathSaveRequest;
 import com.digital.model.entity.LearningPath;
 import com.digital.model.entity.User;
@@ -348,6 +349,22 @@ public class LearningPathController {
                                         HttpServletRequest httpRequest) {
         Long resolvedUserId = resolveUserId(userId, httpRequest);
         boolean ok = learningPathService.deleteLearningPath(resolvedUserId, pathId);
+        return ResultUtils.success(ok);
+    }
+
+    /**
+     * 重命名学习路径的 topic
+     */
+    @PutMapping("/{pathId}/topic")
+    public BaseResponse<Boolean> renameTopic(@PathVariable String pathId,
+                                             @RequestParam(required = false) Long userId,
+                                             @RequestBody LearningPathRenameTopicRequest request,
+                                             HttpServletRequest httpRequest) {
+        Long resolvedUserId = resolveUserId(userId, httpRequest);
+        if (request == null || StringUtils.isBlank(request.getTopic())) {
+            return new BaseResponse<>(ErrorCode.PARAMS_ERROR.getCode(), null, "新主题不能为空");
+        }
+        boolean ok = learningPathService.renameTopic(resolvedUserId, pathId, request.getTopic().trim());
         return ResultUtils.success(ok);
     }
 

@@ -30,6 +30,7 @@ type SiliconFlowHandler struct {
 	APIKey          string
 	Endpoint        string
 	Model           string
+	SystemPrompt    string
 	searchApiUrl    string
 	searchApiKey    string
 	searchApiModel  string
@@ -110,17 +111,20 @@ type RespData struct {
 	} `json:"choices"`
 }
 
-func NewSiliconFlowHandler(ctx context.Context, apiKey, endpoint, model string, logger *logrus.Logger, searchApiUrl, searchApiKey, searchApiModel string) *SiliconFlowHandler {
-	return &SiliconFlowHandler{
+func NewSiliconFlowHandler(ctx context.Context, apiKey, endpoint, model, systemPrompt string, logger *logrus.Logger, searchApiUrl, searchApiKey, searchApiModel string) *SiliconFlowHandler {
+	h := &SiliconFlowHandler{
 		ctx:            ctx,
 		APIKey:         apiKey,
 		Endpoint:       endpoint,
 		Model:          model,
+		SystemPrompt:   systemPrompt,
 		logger:         logger,
 		searchApiUrl:   searchApiUrl,
 		searchApiKey:   searchApiKey,
 		searchApiModel: searchApiModel,
 	}
+	h.ResetHistory()
+	return h
 }
 
 // SetInterviewPrompt 设置面试官专用提示词（与 tools 通用智能体分离）
@@ -438,5 +442,12 @@ func (h *SiliconFlowHandler) Query(userMsg string) (string, error) {
 func (h *SiliconFlowHandler) ResetHistory() {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
+	if strings.TrimSpace(h.SystemPrompt) != "" {
+		h.history = []SFMessage{{
+			Role:    "system",
+			Content: h.SystemPrompt,
+		}}
+		return
+	}
 	h.history = []SFMessage{}
 }

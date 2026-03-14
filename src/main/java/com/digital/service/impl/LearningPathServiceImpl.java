@@ -450,6 +450,58 @@ public class LearningPathServiceImpl implements LearningPathService {
         return learningPathNeo4jService.getLearningPathGraph(userId, pathId);
     }
 
+    @Override
+    public boolean renameTopic(Long userId, String pathId, String newTopic) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "用户 ID 不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(pathId), ErrorCode.PARAMS_ERROR, "路径 ID 不能为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(newTopic), ErrorCode.PARAMS_ERROR, "新主题不能为空");
+
+        LearningPath path = getById(userId, pathId);
+        if (path == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "学习路径不存在");
+        }
+        String trimmedTopic = newTopic.trim();
+        if (trimmedTopic.equals(path.getTopic())) {
+            return true;
+        }
+
+        LearningPathJson pathJson;
+        try {
+            pathJson = objectMapper.readValue(path.getPathJson(), LearningPathJson.class);
+        } catch (Exception e) {
+            log.error("解析学习路径 JSON 失败（重命名 topic）: pathId={}, error={}", pathId, e.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "学习路径数据异常，无法重命名主题");
+        }
+
+        String oldTopic = path.getTopic();
+
+        // Saga：先更新 Neo4j（带新 topic），再更新 MySQL；MySQL 失败时回滚 Neo4j 主题
+        try {
+            learningPathNeo4jService.updateLearningPath(userId, pathId, trimmedTopic, pathJson);
+        } catch (Exception e) {
+            log.error("Neo4j 重命名学习路径主题失败: pathId={}, newTopic={}, error={}", pathId, trimmedTopic, e.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "重命名学习路径主题失败");
+        }
+
+        path.setTopic(trimmedTopic);
+        path.setUpdateTime(new Date());
+        try {
+            int rows = learningPathMapper.updateById(path);
+            if (rows <= 0) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "更新 MySQL 失败");
+            }
+            return true;
+        } catch (Exception e) {
+            log.error("MySQL 重命名学习路径主题失败，回滚 Neo4j 主题: pathId={}, error={}", pathId, e.getMessage());
+            try {
+                learningPathNeo4jService.updateLearningPath(userId, pathId, oldTopic, pathJson);
+            } catch (Exception ignored) {
+                log.error("回滚 Neo4j 主题失败: pathId={}, oldTopic={}", pathId, oldTopic);
+            }
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "重命名学习路径主题失败：" + e.getMessage());
+        }
+    }
+
     private static final String RECOMMEND_SYSTEM_PROMPT = """
             你是一个学习路径助手。根据用户给出的「知识主题」，生成一份「建议向 AI 提问的推荐学习知识点列表」。
             这些知识点会由用户拿去问别的 AI（如问答机器人），因此每条都要以「求知的姿态」表述：即像学习者向老师/AI 提问那样，写成具体、可回答的问题或学习点。
