@@ -13,7 +13,8 @@ import (
 func Handle(ctx *tools.ToolContext, args string) (string, error) {
 	var params struct {
 		EventName       string `json:"eventName"`
-		Importance      int    `json:"importance"`
+		// importance 可能由模型以 number(4) 或 string("4") 两种形式返回，这里先用 RawMessage 兼容解析
+		Importance      json.RawMessage `json:"importance"`
 		PersonalInsight string `json:"personalInsight"`
 		Date            string `json:"date"`
 	}
@@ -29,10 +30,22 @@ func Handle(ctx *tools.ToolContext, args string) (string, error) {
 		return "", fmt.Errorf("eventName is required")
 	}
 
-	// 默认重要程度为4
-	importance := params.Importance
-	if importance == 0 {
-		importance = 4
+	// 重要程度：默认为 4。兼容 number/string。
+	importance := 4
+	if len(params.Importance) > 0 {
+		// 1) 先尝试按 int 解析
+		var asInt int
+		if err := json.Unmarshal(params.Importance, &asInt); err == nil {
+			importance = asInt
+		} else {
+			// 2) 再尝试按 string 解析（如 "4"）
+			var asStr string
+			if err2 := json.Unmarshal(params.Importance, &asStr); err2 == nil {
+				if v, err3 := parseImportanceString(asStr); err3 == nil {
+					importance = v
+				}
+			}
+		}
 	}
 	if importance < 1 || importance > 5 {
 		importance = 4
@@ -101,6 +114,26 @@ func Handle(ctx *tools.ToolContext, args string) (string, error) {
 	}
 	msg += "。请手动上传图片和文件，然后点击保存。"
 	return msg, nil
+}
+
+func parseImportanceString(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("importance empty")
+	}
+	// 允许 "4" / "4.0" 等简单情况
+	if strings.Contains(s, ".") {
+		var f float64
+		if err := json.Unmarshal([]byte(s), &f); err != nil {
+			return 0, err
+		}
+		return int(f), nil
+	}
+	var n int
+	if err := json.Unmarshal([]byte(s), &n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // HandleAddToday 执行添加今日成长记录：发送指令到前端，让前端触发添加今日记录功能

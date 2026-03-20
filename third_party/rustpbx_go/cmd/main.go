@@ -51,8 +51,28 @@ func main() {
 	ctx := context.Background()
 	logger := logrus.New()
 	llm := handler.NewLLMHandler(ctx, cfg.LLM.APIKey, cfg.LLM.URL, cfg.LLM.SystemPrompt, logger)
-	siliconFlowLLM := handler.NewSiliconFlowHandler(ctx, cfg.LLM.SiliconFlow.APIKey, cfg.LLM.SiliconFlow.URL, cfg.LLM.SiliconFlow.Model, logger, cfg.BigModel.SearchApiUrl, cfg.BigModel.SearchApiKey, cfg.BigModel.SearchApiModel)
-	siliconFlowLLM.SetInterviewPrompt(cfg.LLM.SiliconFlow.InterviewPrompt)
+	siliconFlowToolsLLM := handler.NewSiliconFlowHandler(
+		ctx,
+		cfg.LLM.SiliconFlow.APIKey,
+		cfg.LLM.SiliconFlow.URL,
+		cfg.LLM.SiliconFlow.Model,
+		cfg.LLM.SiliconFlow.SystemPrompt,
+		logger,
+		cfg.BigModel.SearchApiUrl,
+		cfg.BigModel.SearchApiKey,
+		cfg.BigModel.SearchApiModel,
+	)
+	siliconFlowToolsLLM.SetInterviewPrompt(cfg.LLM.SiliconFlow.InterviewPrompt)
+	newInterviewer := func() *handler.SiliconFlowInterviewer {
+		return handler.NewSiliconFlowInterviewer(
+			ctx,
+			cfg.LLM.SiliconFlow.APIKey,
+			cfg.LLM.SiliconFlow.URL,
+			cfg.LLM.SiliconFlow.InterviewModel,
+			cfg.LLM.SiliconFlow.InterviewSystemPrompt,
+			logger,
+		)
+	}
 
 	r := gin.Default()
 	gin.SetMode(gin.ReleaseMode)
@@ -75,8 +95,20 @@ func main() {
 		logrus.Info("Connected to backend successfully!")
 	}
 	// shane: 前端建立连接；注入 FrontendSender 以便 switchNavTab 等工具向前端发指令
-	frontendServer := ws.NewFrontendServer(llm, siliconFlowLLM, backendConn, backendServer, cfg.Audio.Codec, asrOption, ttsOption, cfg.Java.BaseURL, cfg.Java.InternalToken)
-	siliconFlowLLM.SetFrontendSender(ws.NewFrontendCommandSender(frontendServer))
+	frontendServer := ws.NewFrontendServer(
+		llm,
+		siliconFlowToolsLLM,
+		newInterviewer,
+		cfg.LLM.SiliconFlow.InterviewPrompt,
+		backendConn,
+		backendServer,
+		cfg.Audio.Codec,
+		asrOption,
+		ttsOption,
+		cfg.Java.BaseURL,
+		cfg.Java.InternalToken,
+	)
+	siliconFlowToolsLLM.SetFrontendSender(ws.NewFrontendCommandSender(frontendServer))
 	frontendServer.Start(r, cfg.Server.Port)
 
 	select {}

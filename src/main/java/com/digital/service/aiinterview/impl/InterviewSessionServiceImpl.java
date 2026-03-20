@@ -426,6 +426,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
                 重要：本报告的评判应当“以面试过程为主、简历为辅”。
                 - 面试过程 = AI 的提问 + 用户的回答（包括实时语音聊天记录与逐题 Q&A）。
                 - 简历仅用于提供背景，不代表真实能力，不允许因为简历漂亮就给高分；当对话表现与简历不一致时，以对话表现为准。
+                - 如果输入中没有提供逐题 Q&A（例如实时语音模式只给了对话记录），则只能基于对话记录做总结与评分，不要编造不存在的题目与回答。
 
                 输出字段建议：
                 overallScore(0-100), dimensionScores{technical,communication,logic,confidence},
@@ -453,12 +454,38 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
             sb.append("\n");
         }
 
-        sb.append("Q&A（题目与回答，含评分）：\n");
-        for (InterviewQuestion q : questions) {
-            sb.append("Q").append(q.getOrderNo()).append("[").append(q.getType()).append("]: ").append(q.getContent()).append("\n");
-            InterviewAnswer a = answers.stream().filter(x -> q.getId().equals(x.getQuestionId())).findFirst().orElse(null);
-            sb.append("A: ").append(a == null ? "" : StringUtils.defaultString(a.getTextAnswer())).append("\n");
-            sb.append("EvalJson: ").append(a == null ? "" : StringUtils.defaultString(a.getEvaluationJson())).append("\n\n");
+        // 实时语音模式：chatMessages 的 questionId 通常为 null（InternalAiInterviewChatController 写入时固定传 null）
+        // 且 MySQL 的 InterviewAnswer/逐题评分可能为空或不完整，此时不要拼接固定题目 Q&A，避免报告出现“没问过的题目”。
+        int chatWithQuestionId = 0;
+        if (chatMessages != null) {
+            for (InterviewChatMessage m : chatMessages) {
+                if (m != null && m.getQuestionId() != null) {
+                    chatWithQuestionId++;
+                }
+            }
+        }
+        boolean isRealtimeVoiceMode = chatWithQuestionId == 0 && (answers == null || answers.isEmpty());
+
+        if (!isRealtimeVoiceMode) {
+            List<InterviewQuestion> safeQuestions = questions == null ? List.of() : questions;
+            List<InterviewAnswer> safeAnswers = answers == null ? List.of() : answers;
+
+            sb.append("Q&A（题目与回答，含评分）：\n");
+            for (InterviewQuestion q : safeQuestions) {
+                if (q == null) {
+                    continue;
+                }
+                sb.append("Q").append(q.getOrderNo()).append("[").append(q.getType()).append("]: ").append(q.getContent()).append("\n");
+                InterviewAnswer a = safeAnswers.stream()
+                        .filter(x -> x != null && q.getId() != null && q.getId().equals(x.getQuestionId()))
+                        .findFirst()
+                        .orElse(null);
+                sb.append("A: ").append(a == null ? "" : StringUtils.defaultString(a.getTextAnswer())).append("\n");
+                sb.append("EvalJson: ").append(a == null ? "" : StringUtils.defaultString(a.getEvaluationJson())).append("\n\n");
+            }
+        } else {
+            sb.append("Q&A（题目与回答，含评分）：\n");
+            sb.append("（本次为实时语音模式：未提供逐题 Q&A / questionId 为空，仅基于对话记录生成报告，不编造题目与回答。）\n");
         }
         return llmClient.complete(system, sb.toString()).trim();
     }
