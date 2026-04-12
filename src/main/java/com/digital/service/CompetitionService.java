@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 public class CompetitionService {
 
     private final OkHttpClient httpClient;
-    private static final String SAIKR_URL = "https://www.saikr.com/vs";
+    private static final String SAIKR_URL = "https://www.saikr.com/index/hot/contest";
 
     public CompetitionService() {
         this.httpClient = new OkHttpClient.Builder()
@@ -94,24 +94,20 @@ public class CompetitionService {
         List<Competition> competitions = new ArrayList<>();
 
         try {
-            // 解析HTML文档
             Document doc = Jsoup.parse(html);
 
-            // 查找最新竞赛TOP10的容器
-            Element listContainer = doc.selectFirst("div.ranking-new-list");
-            if (listContainer == null) {
-                log.warn("未找到最新竞赛列表容器 div.ranking-new-list");
+            Elements items = doc.select("ul.sk-ranklist > li.item");
+            if (items.isEmpty()) {
+                log.warn("未找到竞赛列表 ul.sk-ranklist > li.item");
                 return competitions;
             }
 
-            // 提取所有竞赛链接
-            Elements competitionLinks = listContainer.select("a");
-            log.info("找到 {} 个竞赛链接", competitionLinks.size());
+            int limit = Math.min(10, items.size());
+            log.info("找到 {} 条竞赛条目，取前 {} 条", items.size(), limit);
 
-            // 遍历每个竞赛链接，提取信息
-            for (Element link : competitionLinks) {
+            for (int i = 0; i < limit; i++) {
                 try {
-                    Competition competition = parseCompetitionFromLink(link);
+                    Competition competition = parseCompetitionFromListItem(items.get(i), i + 1);
                     if (competition != null) {
                         competitions.add(competition);
                     }
@@ -128,44 +124,47 @@ public class CompetitionService {
         return competitions;
     }
 
-    /**
-     * 从单个链接元素解析竞赛信息
-     *
-     * @param link 链接元素
-     * @return 竞赛信息
-     */
-    private Competition parseCompetitionFromLink(Element link) {
-        try {
-            // 提取链接
-            String url = link.attr("href");
-            if (url.isEmpty()) {
-                return null;
-            }
-
-            // 提取排名、名称、热度值（<a>标签下的3个<span>）
-            Elements spans = link.select("span");
-            if (spans.size() < 3) {
-                log.warn("竞赛链接格式异常，span数量: {}", spans.size());
-                return null;
-            }
-
-            // 解析排名
-            String rankText = spans.get(0).text().trim();
-            Integer rank = Integer.parseInt(rankText);
-
-            // 解析名称
-            String name = spans.get(1).text().trim();
-
-            // 解析热度值
-            String popularityText = spans.get(2).text().trim();
-
-            return new Competition(rank, name, popularityText, url);
-        } catch (NumberFormatException e) {
-            log.warn("解析竞赛数据时数字格式异常", e);
-            return null;
-        } catch (Exception e) {
-            log.warn("解析竞赛信息时发生异常", e);
+    private Competition parseCompetitionFromListItem(Element li, int rank) {
+        Element titleLink = li.selectFirst("div.list-info > a");
+        if (titleLink == null) {
+            log.warn("竞赛条目缺少标题链接 div.list-info > a");
             return null;
         }
+
+        String href = titleLink.attr("href");
+        if (href == null || href.isEmpty()) {
+            return null;
+        }
+
+        String name = titleLink.text().trim();
+        String url = normalizeSaikrUrl(href);
+        String popularity = extractViewCount(li);
+
+        return new Competition(rank, name, popularity, url);
+    }
+
+    /**
+     * 底部「浏览」量文案去掉「浏览」，仅保留如 19.0万
+     */
+    private String extractViewCount(Element li) {
+        Element viewSpan = li.selectFirst("div.btm-info span.mr20");
+        if (viewSpan == null) {
+            return "";
+        }
+        String raw = viewSpan.text().replace('\u00A0', ' ').trim();
+        return raw.replace("浏览", "").trim();
+    }
+
+    private String normalizeSaikrUrl(String href) {
+        if (href.startsWith("http://") || href.startsWith("https://")) {
+            return href;
+        }
+        if (href.startsWith("//")) {
+            return "https:" + href;
+        }
+        if (href.startsWith("/")) {
+            return "https://www.saikr.com" + href;
+        }
+        return "https://www.saikr.com/" + href;
     }
 }
