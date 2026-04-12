@@ -242,14 +242,8 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
             proxy.generateFlashCardAsync(tempFlashCardId, userId, request);
         } catch (Exception e) {
             log.error("启动异步生成任务失败：flashCardId={}, error={}", tempFlashCardId, e.getMessage(), e);
-            // 更新进度为失败
             flashCardProgressManager.updateProgress(tempFlashCardId, "FAILED", 0, "启动异步生成任务失败：" + e.getMessage());
-            // 更新 Redis 中的临时闪卡为失败状态
-            flashCard.setId(tempFlashCardId); // 确保ID字段被设置
-            flashCard.setTitle("生成失败");
-            flashCard.setContent("启动异步生成任务失败：" + e.getMessage());
-            flashCard.setHtmlContent("<div style='padding: 20px; text-align: center; color: red;'><p>启动异步生成任务失败，请重试</p></div>");
-            redisTemplate.opsForValue().set(tempFlashCardId, flashCard, 7, java.util.concurrent.TimeUnit.DAYS); // 重新设置过期时间
+            removeTempFlashCardFromRedis(tempFlashCardId, userId);
         }
 
         return tempFlashCardId;
@@ -312,18 +306,16 @@ public class FlashCardServiceImpl extends ServiceImpl<FlashCardMapper, FlashCard
             log.error("闪卡生成失败：flashCardId={}, userId={}, error={}", flashCardId, userId, e.getMessage(), e);
             String errorMessage = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             flashCardProgressManager.updateProgress(flashCardId, "FAILED", 0, "闪卡生成失败：" + errorMessage);
+            removeTempFlashCardFromRedis(flashCardId, userId);
 
-            // 更新 Redis 中的临时闪卡为失败状态
-            FlashCard flashCard = (FlashCard) redisTemplate.opsForValue().get(flashCardId);
-            if (flashCard != null) {
-                flashCard.setId(flashCardId); // 确保ID字段被设置
-                flashCard.setTitle("生成失败");
-                flashCard.setContent("AI生成失败：" + errorMessage);
-                flashCard.setHtmlContent("<div style='padding: 20px; text-align: center; color: red;'><p>AI生成失败，请重试</p></div>");
-                redisTemplate.opsForValue().set(flashCardId, flashCard, tempFlashCardExpirationDays, java.util.concurrent.TimeUnit.DAYS); // 重新设置过期时间
-            }
-            
             eventPublisher.publishEvent(new FlashCardGeneratedEvent(this, flashCardId, userId, "failed", errorMessage));
+        }
+    }
+
+    private void removeTempFlashCardFromRedis(String flashCardId, Long userId) {
+        redisTemplate.delete(flashCardId);
+        if (userId != null) {
+            redisTemplate.opsForSet().remove("user_temp_flashcards:" + userId, flashCardId);
         }
     }
 
