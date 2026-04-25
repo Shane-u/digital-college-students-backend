@@ -1,7 +1,8 @@
 package com.digital.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.digital.model.CareerPlanState;
-import com.digital.service.WorkflowRuntime;
+import com.digital.model.entity.CareerPlanReport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +32,9 @@ public class DifyWorkflowService {
     
     @Resource
     private WorkflowRuntime runtime;
+
+    @Resource
+    private CareerPlanReportService careerPlanReportService;
     
     private final ObjectMapper objectMapper = new ObjectMapper();
     
@@ -285,6 +289,13 @@ public class DifyWorkflowService {
                                 
                                 runtime.appendEvent(runId, "dify_workflow", "finished", 
                                         "工作流执行完成: " + status);
+
+                                // 报告自动落库（成功/失败都记录，便于历史追溯）
+                                try {
+                                    persistReport(runId);
+                                } catch (Exception e) {
+                                    log.warn("职业规划报告落库失败，runId: {}", runId, e);
+                                }
                                 break;
                                 
                             case "ping":
@@ -323,6 +334,32 @@ public class DifyWorkflowService {
                 } else {
                     s.setReportMarkdown("# 职业规划报告\n\n工作流执行完成，但未生成报告内容。");
                 }
+            }
+        });
+    }
+
+    /**
+     * 将当前 runId 的最终状态与报告内容落库到 career_plan_report
+     */
+    private void persistReport(String runId) {
+        runtime.get(runId).ifPresent(state -> {
+            CareerPlanReport report = new CareerPlanReport();
+            report.setUserId(state.getUserId());
+            report.setRunId(runId);
+            report.setReportMarkdown(state.getReportMarkdown());
+            report.setError(state.getError());
+
+            // 同一 userId + runId 存在则更新
+            QueryWrapper<CareerPlanReport> qw = new QueryWrapper<>();
+            qw.eq("userId", state.getUserId());
+            qw.eq("runId", runId);
+            qw.last("limit 1");
+            CareerPlanReport exist = careerPlanReportService.getOne(qw);
+            if (exist != null) {
+                report.setId(exist.getId());
+                careerPlanReportService.updateById(report);
+            } else {
+                careerPlanReportService.save(report);
             }
         });
     }
