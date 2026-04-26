@@ -118,8 +118,8 @@ public class GrowthRecordController {
             // 保存文件记录到数据库（即使秒传也创建新记录）
             GrowthFile growthFile = new GrowthFile();
             growthFile.setUserId(loginUser.getId());
-            // fileUrl中9002全部替换为9003
-            fileUrl = fileUrl.replace(":9002/", ":9003/");
+            // 规范化为本服务代理 URL（兼容历史存储的 MinIO 链接，避免 Mixed Content）
+            fileUrl = minioManager.normalizeToProxyUrl(fileUrl);
             growthFile.setFileUrl(fileUrl);
             growthFile.setFileName(file.getOriginalFilename());
             growthFile.setFileSize(file.getSize());
@@ -186,7 +186,8 @@ public class GrowthRecordController {
             // 保存图片记录到数据库（即使秒传也创建新记录）
             GrowthImage growthImage = new GrowthImage();
             growthImage.setUserId(loginUser.getId());
-            imageUrl = imageUrl.replace(":9002/", ":9003/");
+            // 规范化为本服务代理 URL（兼容历史存储的 MinIO 链接，避免 Mixed Content）
+            imageUrl = minioManager.normalizeToProxyUrl(imageUrl);
             growthImage.setImageUrl(imageUrl);
             growthImage.setImageName(file.getOriginalFilename());
             growthImage.setImageSize(file.getSize());
@@ -297,6 +298,7 @@ public class GrowthRecordController {
             GrowthImageVO imageVO = new GrowthImageVO();
             image.setUploadTime(new Date(image.getUploadTime().getTime()+8*60*60*1000)); // 转为北京时间
             BeanUtils.copyProperties(image, imageVO);
+            imageVO.setImageUrl(minioManager.normalizeToProxyUrl(imageVO.getImageUrl()));
             // 如果是成长记录中的照片（type=2），将 imageName 设置为对应的 eventDesc；否则保留图片名
             if (image.getType() != null && image.getGrowthRecordId() != null) {
                 String eventDesc = recordIdToEventDesc.get(image.getGrowthRecordId());

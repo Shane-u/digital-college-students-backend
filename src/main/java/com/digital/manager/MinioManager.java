@@ -40,6 +40,62 @@ public class MinioManager {
     private ExecutorService fileProcessExecutor;
 
     /**
+     * 构建本服务（HTTPS）上的代理访问 URL，避免前端直接访问 MinIO 9003（HTTP）导致 Mixed Content
+     *
+     * 注意：server.servlet.context-path=/api，因此这里返回以 /api 开头的相对路径
+     */
+    public String buildLocalProxyUrl(String objectName) {
+        try {
+            String encoded = java.net.URLEncoder.encode(objectName, "UTF-8");
+            return "/api/file/proxy?objectName=" + encoded + "&preview=true";
+        } catch (Exception e) {
+            // 兜底：不编码（极少数情况下会有问题，但不影响主流程）
+            return "/api/file/proxy?objectName=" + objectName + "&preview=true";
+        }
+    }
+
+    /**
+     * 构建 MinIO Console API 下载/预览地址（通常为 9003）
+     * 内部服务端请求使用此 URL；浏览器端不要直接访问该 URL。
+     */
+    public String buildMinioApiDownloadUrl(String objectName, boolean preview) {
+        String endpoint = minioConfig.getEndpoint();
+        // 如果 endpoint 包含 9002，替换为 9003（console api 端口）
+        if (endpoint.contains(":9002")) {
+            endpoint = endpoint.replace(":9002", ":9003");
+        }
+        endpoint = endpoint.replaceAll("/+$", "");
+
+        String bucket = minioConfig.getBucketName();
+        String encodedObjectName;
+        try {
+            encodedObjectName = java.net.URLEncoder.encode(objectName, "UTF-8");
+        } catch (Exception e) {
+            encodedObjectName = objectName;
+        }
+        return endpoint + "/api/v1/buckets/" + bucket + "/objects/download?preview=" + preview + "&prefix=" + encodedObjectName;
+    }
+
+    /**
+     * 将任意已存储的 MinIO 访问 URL 规范化为本服务代理 URL。
+     * 用于兼容历史数据里存储的 http://host:9003/... 链接，避免前端出现 Mixed Content。
+     */
+    public String normalizeToProxyUrl(String fileUrlOrProxyUrl) {
+        if (fileUrlOrProxyUrl == null || fileUrlOrProxyUrl.isBlank()) {
+            return fileUrlOrProxyUrl;
+        }
+        // 已经是代理 URL（相对或绝对）则直接返回
+        if (fileUrlOrProxyUrl.contains("/api/file/proxy")) {
+            return fileUrlOrProxyUrl;
+        }
+        String objectName = extractObjectNameFromUrl(fileUrlOrProxyUrl);
+        if (objectName == null || objectName.isBlank()) {
+            return fileUrlOrProxyUrl;
+        }
+        return buildLocalProxyUrl(objectName);
+    }
+
+    /**
      * 应用启动时初始化：确保 bucket 存在并设置为公开访问
      */
     @PostConstruct
@@ -238,26 +294,8 @@ public class MinioManager {
                             .contentType(contentType)
                             .build()
             );
-            // 返回文件访问地址（使用 Minio API 格式，9003 端口）
-            String endpoint = minioConfig.getEndpoint();
-            // 如果 endpoint 包含 9002，替换为 9003
-            if (endpoint.contains(":9002")) {
-                endpoint = endpoint.replace(":9002", ":9003");
-            }
-            // 移除 endpoint 末尾的斜杠
-            endpoint = endpoint.replaceAll("/+$", "");
-            
-            // 使用 Minio API 格式：/api/v1/buckets/{bucket}/objects/download?preview=true&prefix={objectName}
-            try {
-                String encodedObjectName = java.net.URLEncoder.encode(objectName, "UTF-8");
-                return endpoint + "/api/v1/buckets/" + minioConfig.getBucketName() 
-                        + "/objects/download?preview=true&prefix=" + encodedObjectName;
-            } catch (Exception e) {
-                log.error("URL 编码失败: {}", objectName, e);
-                // 如果编码失败，使用未编码的版本
-                return endpoint + "/api/v1/buckets/" + minioConfig.getBucketName() 
-                        + "/objects/download?preview=true&prefix=" + objectName;
-            }
+            // 返回本服务的 HTTPS 代理地址（避免 Mixed Content）
+            return buildLocalProxyUrl(objectName);
         } catch (Exception e) {
             log.error("上传文件到 Minio 失败: {}", objectName, e);
             throw new RuntimeException("上传文件失败", e);
@@ -290,25 +328,7 @@ public class MinioManager {
      * @return 文件访问地址（使用 Minio API 格式，9003 端口）
      */
     public String getFileUrl(String objectName) {
-        String endpoint = minioConfig.getEndpoint();
-        // 如果 endpoint 包含 9002，替换为 9003
-        if (endpoint.contains(":9002")) {
-            endpoint = endpoint.replace(":9002", ":9003");
-        }
-        // 移除 endpoint 末尾的斜杠
-        endpoint = endpoint.replaceAll("/+$", "");
-        
-        // 使用 Minio API 格式：/api/v1/buckets/{bucket}/objects/download?preview=true&prefix={objectName}
-        try {
-            String encodedObjectName = java.net.URLEncoder.encode(objectName, "UTF-8");
-            return endpoint + "/api/v1/buckets/" + minioConfig.getBucketName() 
-                    + "/objects/download?preview=true&prefix=" + encodedObjectName;
-        } catch (Exception e) {
-            log.error("URL 编码失败: {}", objectName, e);
-            // 如果编码失败，使用未编码的版本
-            return endpoint + "/api/v1/buckets/" + minioConfig.getBucketName() 
-                    + "/objects/download?preview=true&prefix=" + objectName;
-        }
+        return buildLocalProxyUrl(objectName);
     }
 
     /**
@@ -326,6 +346,24 @@ public class MinioManager {
         }
         try {
             String bucketName = minioConfig.getBucketName();
+
+            // 先处理本服务代理格式：/api/file/proxy?objectName=xxx
+            int proxyIndex = fileUrl.indexOf("/api/file/proxy");
+            if (proxyIndex >= 0) {
+                int objIndex = fileUrl.indexOf("objectName=");
+                if (objIndex >= 0) {
+                    String v = fileUrl.substring(objIndex + "objectName=".length());
+                    int andIndex = v.indexOf("&");
+                    if (andIndex >= 0) {
+                        v = v.substring(0, andIndex);
+                    }
+                    try {
+                        return java.net.URLDecoder.decode(v, "UTF-8");
+                    } catch (Exception e) {
+                        return v;
+                    }
+                }
+            }
             
             // 优先处理 Minio API 格式
             String apiPattern = "/api/v1/buckets/" + bucketName + "/objects/download";

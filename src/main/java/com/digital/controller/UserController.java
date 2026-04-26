@@ -371,7 +371,7 @@ public class UserController {
             String md5 = minioManager.calculateMerkleTreeMd5(new ByteArrayInputStream(fileBytes), 2 * 1024 * 1024);
             String objectName = "avatars/" + loginUser.getId() + "/" + md5 + "/" + file.getOriginalFilename();
             String url = minioManager.putObject(objectName, inputStream, file.getContentType(), file.getSize());
-            url = url.replace(":9002/", ":9003/");
+            url = minioManager.normalizeToProxyUrl(url);
             return ResultUtils.success(url);
         } catch (Exception e) {
             log.error("头像上传失败", e);

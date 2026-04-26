@@ -2,8 +2,8 @@ package com.digital.service.aiinterview.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.digital.common.ErrorCode;
-import com.digital.exception.BusinessException;
 import com.digital.exception.ThrowUtils;
+import com.digital.manager.MinioManager;
 import com.digital.mapper.CandidateProfileMapper;
 import com.digital.mapper.CandidateResumeMapper;
 import com.digital.model.entity.CandidateProfile;
@@ -22,7 +22,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.tika.Tika;
-import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -34,6 +33,7 @@ public class ResumeServiceImpl implements ResumeService {
     private final CandidateResumeMapper resumeMapper;
     private final CandidateProfileMapper profileMapper;
     private final AiInterviewFileStorageService fileStorageService;
+    private final MinioManager minioManager;
     private final LlmClient llmClient;
 
     private final Tika tika = new Tika();
@@ -85,7 +85,7 @@ public class ResumeServiceImpl implements ResumeService {
         CandidateResume resume = getResumeEntity(userId, resumeId);
         ResumeVO vo = new ResumeVO();
         vo.setResumeId(resume.getId());
-        vo.setFileUrl(resume.getFileUrl());
+        vo.setFileUrl(minioManager.normalizeToProxyUrl(resume.getFileUrl()));
         vo.setOriginalFilename(resume.getOriginalFilename());
         vo.setRawText(resume.getRawText());
         vo.setParsedJson(resume.getParsedJson());
@@ -114,7 +114,7 @@ public class ResumeServiceImpl implements ResumeService {
         for (CandidateResume resume : list) {
             ResumeVO vo = new ResumeVO();
             vo.setResumeId(resume.getId());
-            vo.setFileUrl(resume.getFileUrl());
+            vo.setFileUrl(minioManager.normalizeToProxyUrl(resume.getFileUrl()));
             vo.setOriginalFilename(resume.getOriginalFilename());
             vo.setRawText(resume.getRawText());
             vo.setParsedJson(resume.getParsedJson());

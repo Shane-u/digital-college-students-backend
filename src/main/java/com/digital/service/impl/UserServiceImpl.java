@@ -9,6 +9,7 @@ import com.digital.common.ErrorCode;
 import com.digital.constant.CommonConstant;
 import com.digital.exception.BusinessException;
 import com.digital.mapper.UserMapper;
+import com.digital.manager.MinioManager;
 import com.digital.model.dto.user.UserQueryRequest;
 import com.digital.model.entity.User;
 import com.digital.model.entity.VerificationCode;
@@ -47,6 +48,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Resource
     private RedisCacheUtils redisCacheUtils;
+
+    @Resource
+    private MinioManager minioManager;
 
     /**
      * 盐值，混淆密码
@@ -291,6 +295,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         LoginUserVO loginUserVO = new LoginUserVO();
         BeanUtils.copyProperties(user, loginUserVO);
+        // 兼容历史数据库/缓存中存的 MinIO 直链（http://...:9003），统一转为本服务代理 URL
+        loginUserVO.setUserAvatar(minioManager.normalizeToProxyUrl(loginUserVO.getUserAvatar()));
         return loginUserVO;
     }
 
@@ -301,6 +307,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         UserVO userVO = new UserVO();
         BeanUtils.copyProperties(user, userVO);
+        userVO.setUserAvatar(minioManager.normalizeToProxyUrl(userVO.getUserAvatar()));
         return userVO;
     }
 

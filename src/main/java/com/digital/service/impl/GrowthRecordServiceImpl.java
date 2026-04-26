@@ -8,6 +8,7 @@ import com.digital.exception.ThrowUtils;
 import com.digital.mapper.GrowthFileMapper;
 import com.digital.mapper.GrowthImageMapper;
 import com.digital.mapper.GrowthRecordMapper;
+import com.digital.manager.MinioManager;
 import com.digital.model.dto.growthrecord.GrowthRecordQueryRequest;
 import com.digital.model.entity.GrowthFile;
 import com.digital.model.entity.GrowthImage;
@@ -46,6 +47,9 @@ public class GrowthRecordServiceImpl extends ServiceImpl<GrowthRecordMapper, Gro
 
     @Resource
     private GrowthFileMapper growthFileMapper;
+
+    @Resource
+    private MinioManager minioManager;
 
     @Override
     public void validGrowthRecord(GrowthRecord growthRecord, boolean add) {
@@ -102,6 +106,7 @@ public class GrowthRecordServiceImpl extends ServiceImpl<GrowthRecordMapper, Gro
         List<GrowthImageVO> imageVOList = images.stream().map(image -> {
             GrowthImageVO imageVO = new GrowthImageVO();
             BeanUtils.copyProperties(image, imageVO);
+            imageVO.setImageUrl(minioManager.normalizeToProxyUrl(imageVO.getImageUrl()));
             return imageVO;
         }).collect(Collectors.toList());
         growthRecordVO.setImages(imageVOList);
@@ -113,6 +118,7 @@ public class GrowthRecordServiceImpl extends ServiceImpl<GrowthRecordMapper, Gro
         List<GrowthFileVO> fileVOList = files.stream().map(file -> {
             GrowthFileVO fileVO = new GrowthFileVO();
             BeanUtils.copyProperties(file, fileVO);
+            fileVO.setFileUrl(minioManager.normalizeToProxyUrl(fileVO.getFileUrl()));
             return fileVO;
         }).collect(Collectors.toList());
         growthRecordVO.setFiles(fileVOList);
